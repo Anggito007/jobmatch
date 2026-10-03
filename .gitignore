@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env & secrets
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite3
+
+# Node / frontend
+node_modules/
+.next/
+out/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Upload / artifacts
+data/
+*.log

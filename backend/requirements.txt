@@ -1,0 +1,27 @@
+# ===== Web framework =====
+# Catatan: Python 3.14 butuh versi terbaru yang sudah punya wheel cp314.
+# Jangan pin ke versi lama — pydantic-core (Rust) belum punya wheel 3.14
+# dan akan gagal compile dari source (butuh cargo).
+fastapi>=0.115
+uvicorn>=0.34          # TANPA [standard] — ekstra itu tarik uvloop/watchfiles (Rust)
+python-multipart>=0.0.20
+
+# ===== Data & DB =====
+sqlalchemy>=2.0.36
+pydantic>=2.11
+pydantic-settings>=2.7
+python-dotenv>=1.0
+
+# ===== HTTP / scraping =====
+httpx>=0.28
+
+# ===== Scheduler =====
+apscheduler>=3.11
+
+# ===== CV parsing =====
+pdfplumber>=0.11
+python-docx>=1.1
+
+# ===== Matching (FASE 2 — install terpisah, berat ~2GB) =====
+# sentence-transformers>=3.3
+# torch --index-url https://download.pytorch.org/whl/cpu
