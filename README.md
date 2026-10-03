@@ -29,18 +29,30 @@ backend/   (FastAPI · Python)              ──▶  Render/Railway (gratis)
 cd backend
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt   # Windows
+.venv/Scripts/python -m scripts.warmup_model              # unduh model embedding (sekali)
 .venv/Scripts/python -m uvicorn app.main:app --reload
 ```
 
 Buka http://localhost:8000/docs untuk API docs.
 
-## Verifikasi fetcher
+## API endpoints
+
+| Method | Path | Fungsi |
+|---|---|---|
+| GET | `/health` | Cek status |
+| POST | `/api/cv/upload` | Upload CV (PDF/DOCX) → ekstrak teks |
+| POST | `/api/jobs/refresh` | Fetch + embed + simpan lowongan (dedupe) |
+| GET | `/api/jobs` | Baca lowongan tersimpan (filter `source`, `limit`) |
+| POST | `/api/match` | Upload CV → matching (fetch+embed+score+urutkan) |
+
+## Verifikasi
 
 ```bash
 cd backend
-.venv/Scripts/python -m scripts.verify_fetchers
+.venv/Scripts/python -m scripts.verify_fetchers   # cek fetcher (data live)
+.venv/Scripts/python -m scripts.verify_matching   # cek matching end-to-end
 ```
 
-## Rencana lengkap
+## Rencana lengkap & deployment
 
-Lihat `PLAN.md`.
+Lihat `PLAN.md` (rencana) dan `DEPLOYMENT.md` (kendala hosting free-tier).

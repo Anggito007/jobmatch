@@ -1,0 +1,20 @@
+# Render Blueprint — deploy backend gratis.
+# CATATAN PENTING: free tier Render = 512MB disk + 512MB RAM.
+# Backend ini pakai torch (~500MB) + model embedding (~470MB) = ~1GB → TIDAK
+# muat di free tier. Baca DEPLOYMENT.md sebelum deploy.
+
+services:
+  - type: web
+    name: jobmatch-backend
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////var/data/jobmatch.db
+      - key: CORS_ORIGINS
+        value: https://your-frontend.vercel.app
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
