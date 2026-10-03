@@ -69,12 +69,12 @@ export default function Home() {
         <CvUpload file={file} onFile={setFile} />
         <div className="form-row">
           <div className="field">
-            <label htmlFor="kw">Kata kunci lowongan</label>
+            <label htmlFor="kw">Kata kunci (opsional — CV jadi filter utama)</label>
             <input
               id="kw"
               value={keywords}
               onChange={(e) => setKeywords(e.target.value)}
-              placeholder="mis. backend engineer"
+              placeholder="kosongkan untuk scan semua lowongan"
             />
           </div>
           <div className="field">
@@ -112,10 +112,12 @@ export default function Home() {
 
       {result && (
         <section className="panel">
-          <h2>2. Hasil ({result.count} lowongan)</h2>
+          <h2>2. Hasil ({result.count} lowongan cocok)</h2>
           <div className="result-meta">
             <span className="count">
-              {result.count} lowongan diurutkan berdasarkan kecocokan
+              {result.count} lowongan paling cocok dari {result.pool_size} lowongan
+              yang dipindai (6 sumber: JobStreet, Glints, Dealls, Kalibrr, Karir,
+              TechInAsia)
             </span>
           </div>
           {result.cv_skills.length > 0 && (

@@ -41,6 +41,7 @@ export interface Match {
 export interface MatchResponse {
   cv_skills: string[];
   count: number;
+  pool_size: number;
   keywords: string;
   matches: Match[];
 }

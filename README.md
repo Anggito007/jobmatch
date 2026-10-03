@@ -1,16 +1,17 @@
 # JobMatch
 
-Job seeker automation: upload CV (PDF/DOCX) → otomatis pantau lowongan dari
-beberapa portal (JobStreet, Glints, ...) → tampilkan yang cocok secara semantik
-dengan skor + alasan kecocokan.
+Job seeker automation: upload CV (PDF/DOCX) → pindai ribuan lowongan dari
+**6 portal** → tampilkan yang cocok secara semantik dengan skor + alasan
+kecocokan (CV adalah filter utama, bukan kata kunci).
 
 ## Arsitektur
 
 ```
 frontend/  (Next.js · React · TypeScript)  ──▶  Vercel (gratis)
-backend/   (FastAPI · Python)              ──▶  Render/Railway (gratis)
-              ├─ fetchers/  (JobStreet v5, Glints searchJobsV3, ...)
-              ├─ matching/  (sentence-transformers embedding + cosine)
+backend/   (FastAPI · Python)              ──▶  Render/Railway/VPS
+              ├─ fetchers/  (6 sumber: JobStreet, Glints, Dealls, Kalibrr,
+              │              Karir, TechInAsia)
+              ├─ matching/  (embedding + cosine + skill + lexical hybrid)
               ├─ scheduler/ (APScheduler, fetch berkala + dedupe)
               └─ DB         (SQLite dev → Postgres+pgvector produksi)
 ```
@@ -21,7 +22,18 @@ backend/   (FastAPI · Python)              ──▶  Render/Railway (gratis)
 |---|---|---|
 | JobStreet | `GET id.jobstreet.com/api/jobsearch/v5/search` | ✅ terverifikasi |
 | Glints | `POST glints.com/api/v2-alc/graphql` (searchJobsV3) | ✅ terverifikasi |
+| Dealls | `GET api.sejutacita.id/v1/explore-job/job` | ✅ terverifikasi |
+| Kalibrr | `GET kalibrr.com/kjs/job_board/search` (feed penuh ~1200) | ✅ terverifikasi |
+| Karir.com | `POST gateway2-beta.karir.com/v2/search/opportunities` | ✅ terverifikasi |
+| TechInAsia Jobs | Algolia `219WX3MPV4` index `job_postings` | ✅ terverifikasi |
 | LinkedIn | guest API | ⚠️ opsional (ToS + anti-bot) |
+
+## Cara kerja matching
+
+1. Scheduler mengumpulkan pool lowongan (broad, ribuan) dari 6 sumber → embed → simpan.
+2. Upload CV → ekstrak skill + embed.
+3. Skor hybrid tiap lowongan: `0.45·cosine + 0.30·skill_overlap + 0.25·lexical_overlap`.
+4. Urutkan + diversifikasi (batasi dominasi satu perusahaan/sumber).
 
 ## Jalankan backend (development)
 
@@ -41,9 +53,9 @@ Buka http://localhost:8000/docs untuk API docs.
 |---|---|---|
 | GET | `/health` | Cek status |
 | POST | `/api/cv/upload` | Upload CV (PDF/DOCX) → ekstrak teks |
-| POST | `/api/jobs/refresh` | Fetch + embed + simpan lowongan (dedupe) |
+| POST | `/api/jobs/refresh` | Fetch + embed + simpan pool lowongan (dedupe) |
 | GET | `/api/jobs` | Baca lowongan tersimpan (filter `source`, `limit`) |
-| POST | `/api/match` | Upload CV → matching (fetch+embed+score+urutkan) |
+| POST | `/api/match` | Upload CV → matching terhadap pool (skor + urutkan) |
 
 ## Verifikasi
 

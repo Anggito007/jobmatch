@@ -1,13 +1,14 @@
-"""Verifikasi end-to-end: CV → fetch → embed → score → urutkan.
+"""Verifikasi end-to-end: collect broad → skor CV vs pool DB → urutkan.
 
 Run:
     python -m scripts.verify_matching
 """
 from app.cv.profile import build_profile
-from app.fetchers.glints import GlintsFetcher
-from app.fetchers.jobstreet import JobStreetFetcher
+from app.db import init_db
 from app.matching.embedder import get_embedder
 from app.matching.scorer import job_skills, job_text, score_match
+from app.scheduler import collect_jobs
+from app.store import get_jobs
 
 TEST_CV = """
 Nama: Anggito Alif Abimanyu
@@ -19,35 +20,41 @@ merancang sistem monitoring IoT berbasis LoRa dan ESP32.
 
 
 def main() -> None:
+    init_db()
     profile = build_profile(TEST_CV)
-    print(f"Skills CV terdeteksi ({len(profile.skills)}): {profile.skills}\n")
+    print(f"Skills CV ({len(profile.skills)}): {profile.skills}\n")
 
     emb = get_embedder()
     cv_vec = emb.embed_one(profile.embedding_text)
 
-    jobs = (
-        JobStreetFetcher().fetch(["backend", "engineer"], location="Bandung")
-        + GlintsFetcher().fetch(["backend", "engineer"])
-    )
-    print(f"{len(jobs)} lowongan difetch\n")
-
-    texts = [job_text(j) for j in jobs]
-    vecs = emb.encode(texts)
+    # Kumpulkan pool broad (jika DB kosong).
+    rows = get_jobs(limit=5000)
+    if not rows:
+        print("DB kosong — collect broad...")
+        print(collect_jobs())
+        rows = get_jobs(limit=5000)
+    sources = {r.source for r in rows}
+    print(f"Pool: {len(rows)} lowongan dari {len(sources)} sumber {sorted(sources)}\n")
 
     results = []
-    for job, jvec in zip(jobs, vecs):
-        jskills = job_skills(job)
-        score, matched = score_match(cv_vec, jvec, profile.skills, jskills)
-        results.append((score, matched, job))
+    for row in rows:
+        jtext = job_text(row)
+        jvec = row.embedding or emb.embed_one(jtext)
+        jskills = row.skills or job_skills(row)
+        score, matched = score_match(
+            cv_vec, list(jvec), profile.skills, jskills,
+            cv_text=profile.embedding_text, job_text_str=jtext,
+        )
+        results.append((score, matched, row))
 
     results.sort(key=lambda r: r[0], reverse=True)
 
-    print("=== TOP 10 MATCH ===")
-    for score, matched, job in results[:10]:
-        print(f"  {score:.3f}  [{job.source}] {job.title} @ {job.company}")
+    print("=== TOP 15 MATCH (semua sumber) ===")
+    for score, matched, row in results[:15]:
+        print(f"  {score:.3f}  [{row.source}] {row.title} @ {row.company}")
         if matched:
             print(f"         skill cocok: {', '.join(matched)}")
-        print(f"         {job.url}")
+        print(f"         {row.url}")
 
 
 if __name__ == "__main__":

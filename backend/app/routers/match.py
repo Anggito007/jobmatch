@@ -1,8 +1,14 @@
-"""Endpoint matching: upload CV → fetch lowongan → embed → score → urutkan.
+"""Endpoint matching: upload CV → skor terhadap POOL lowongan tersimpan.
 
-Catatan: endpoint dibuat `def` (bukan `async def`) supaya FastAPI menjalankan
-encoding embedding (blocking, sentence-transformers) di threadpool, tidak
-memblokir event loop.
+Alur (sesuai tujuan "semua loker yang sesuai CV"):
+1. Ekstrak CV → embed.
+2. Baca pool lowongan dari DB (dipopulasi scheduler, sudah di-embed).
+   Jika DB kosong (first run), lakukan pengumpulan broad dulu.
+3. Skor cosine + skill-overlap terhadap SEMUA lowongan pool (bukan keyword).
+4. Urutkan, kembalikan top_n.
+
+Catatan: endpoint `def` (bukan `async def`) supaya FastAPI menjalankan
+encoding embedding (blocking) di threadpool.
 """
 from __future__ import annotations
 
@@ -10,26 +16,21 @@ from fastapi import APIRouter, File, Form, UploadFile
 
 from app.cv.extract import extract_text
 from app.cv.profile import build_profile
-from app.fetchers.glints import GlintsFetcher
-from app.fetchers.jobstreet import JobStreetFetcher
 from app.matching.embedder import get_embedder
 from app.matching.scorer import job_skills, job_text, score_match
+from app.scheduler import collect_jobs
+from app.store import get_jobs
 
 router = APIRouter()
-
-FETCHERS = {
-    "jobstreet": JobStreetFetcher(),
-    "glints": GlintsFetcher(),
-}
 
 
 @router.post("")
 def match_cv(
     file: UploadFile = File(...),
-    keywords: str = Form("backend engineer"),
+    keywords: str = Form(""),       # opsional — seed pengumpulan bila DB kosong
     location: str = Form(""),
     source: str | None = Form(None),
-    top_n: int = Form(20),
+    top_n: int = Form(30),
 ) -> dict:
     # 1. Ekstrak CV → profil → embedding.
     content = file.file.read()
@@ -38,50 +39,83 @@ def match_cv(
     embedder = get_embedder()
     cv_vec = embedder.embed_one(profile.embedding_text)
 
-    # 2. Fetch lowongan dari sumber.
-    sources = [source] if source else list(FETCHERS)
-    jobs = []
-    for src in sources:
-        fetcher = FETCHERS.get(src)
-        if fetcher:
-            jobs.extend(fetcher.fetch(keywords.split(), location=location))
+    # 2. Ambil pool lowongan dari DB (semua sumber, sudah di-embed scheduler).
+    rows = get_jobs(limit=5000)
+    if source:
+        rows = [r for r in rows if r.source == source]
+    if not rows:
+        # First run: kumpulkan broad dulu, lalu baca ulang.
+        kws = keywords.split() if keywords.strip() else []
+        collect_jobs(keywords=kws)
+        rows = get_jobs(limit=5000)
+        if source:
+            rows = [r for r in rows if r.source == source]
 
-    # 3. Embed semua lowongan (batch) + skill.
-    texts = [job_text(j) for j in jobs]
-    vecs = embedder.encode(texts) if texts else []
-
-    # 4. Score tiap lowongan.
+    # 3. Score tiap lowongan (pakai embedding tersimpan; fallback re-embed).
     results: list[dict] = []
-    for job, jvec in zip(jobs, vecs):
-        jskills = job_skills(job)
-        score, matched = score_match(cv_vec, jvec, profile.skills, jskills)
+    for row in rows:
+        jtext = job_text(row)
+        jvec = row.embedding
+        if not jvec:
+            jvec = embedder.embed_one(jtext)
+        jskills = row.skills or job_skills(row)
+        score, matched = score_match(
+            cv_vec, list(jvec), profile.skills, jskills,
+            cv_text=profile.embedding_text, job_text_str=jtext,
+        )
         results.append(
             {
-                "id": job.id,
-                "source": job.source,
-                "title": job.title,
-                "company": job.company,
-                "location": job.location,
-                "salary_min": job.salary_min,
-                "salary_max": job.salary_max,
-                "currency": job.currency,
-                "job_type": job.job_type,
-                "work_arrangement": job.work_arrangement,
-                "description": job.description[:300],
-                "url": job.url,
-                "posted_at": job.posted_at,
+                "id": f"{row.source}:{row.external_id}",
+                "source": row.source,
+                "title": row.title,
+                "company": row.company,
+                "location": row.location,
+                "salary_min": row.salary_min,
+                "salary_max": row.salary_max,
+                "currency": row.currency,
+                "job_type": row.job_type,
+                "work_arrangement": row.work_arrangement,
+                "description": (row.description or "")[:300],
+                "url": row.url,
+                "posted_at": row.posted_at,
                 "score": round(score, 4),
                 "matched_skills": matched,
             }
         )
 
-    # 5. Urutkan menurun, potong ke top_n.
+    # 4. Urutkan menurun, lalu diversifikasi (batasi dominasi satu
+    #    perusahaan/sumber supaya top_n mewakili banyak sumber), potong top_n.
     results.sort(key=lambda r: r["score"], reverse=True)
-    results = results[:top_n]
+    results = _diversify(results, top_n)
 
     return {
         "cv_skills": profile.skills,
         "count": len(results),
+        "pool_size": len(rows),
         "keywords": keywords,
         "matches": results,
     }
+
+
+def _diversify(results: list[dict], top_n: int, max_per_company: int = 2, max_per_source: int = 8) -> list[dict]:
+    """Re-rank untuk keberagaman: batasi tiap perusahaan & sumber.
+
+    Iterasi greedy: ambil yang skor tertinggi, tapi lewati yang sudah melampaui
+    kuota per-perusahaan / per-sumber, sampai terkumpul `top_n` atau habis.
+    """
+    out: list[dict] = []
+    company_count: dict[str, int] = {}
+    source_count: dict[str, int] = {}
+    for r in results:
+        company = r["company"] or "(unknown)"
+        src = r["source"]
+        if company_count.get(company, 0) >= max_per_company:
+            continue
+        if source_count.get(src, 0) >= max_per_source:
+            continue
+        company_count[company] = company_count.get(company, 0) + 1
+        source_count[src] = source_count.get(src, 0) + 1
+        out.append(r)
+        if len(out) >= top_n:
+            break
+    return out

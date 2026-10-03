@@ -49,7 +49,7 @@ class GlintsFetcher(BaseFetcher):
         location: str = "",
         country: str = "ID",
         page_size: int = 30,
-        max_pages: int = 1,
+        max_pages: int = 3,
     ) -> list[Job]:
         jobs: list[Job] = []
         term = " ".join(keywords)

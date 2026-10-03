@@ -28,8 +28,8 @@ class JobStreetFetcher(BaseFetcher):
         self,
         keywords: list[str],
         location: str = "",
-        page_size: int = 20,
-        max_pages: int = 1,
+        page_size: int = 50,
+        max_pages: int = 3,
     ) -> list[Job]:
         jobs: list[Job] = []
         query = " ".join(keywords)

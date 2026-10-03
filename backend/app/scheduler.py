@@ -9,8 +9,12 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.fetchers.dealls import DeallsFetcher
 from app.fetchers.glints import GlintsFetcher
 from app.fetchers.jobstreet import JobStreetFetcher
+from app.fetchers.kalibrr import KalibrrFetcher
+from app.fetchers.karir import KarirFetcher
+from app.fetchers.techinasia import TechInAsiaFetcher
 from app.matching.embedder import get_embedder
 from app.matching.scorer import job_skills, job_text
 from app.store import upsert_jobs
@@ -20,14 +24,23 @@ log = logging.getLogger("jobmatch.scheduler")
 FETCHERS = {
     "jobstreet": JobStreetFetcher(),
     "glints": GlintsFetcher(),
+    "dealls": DeallsFetcher(),
+    "kalibrr": KalibrrFetcher(),
+    "karir": KarirFetcher(),
+    "techinasia": TechInAsiaFetcher(),
 }
 
 _scheduler: BackgroundScheduler | None = None
 
 
 def collect_jobs(keywords: list[str] | None = None, location: str = "") -> dict:
-    """Fetch dari semua sumber, embed, simpan (dedupe)."""
-    keywords = keywords or ["software engineer", "backend", "programmer"]
+    """Fetch dari semua sumber, embed, simpan (dedupe).
+
+    Default: fetch BROAD (keyword kosong → latest dari tiap sumber), supaya
+    pool lowongan beragam dan semantic matching (bukan keyword) yang memilih
+    mana yang cocok dengan CV.
+    """
+    keywords = keywords or []  # list kosong = broad fetch
     total_added = 0
     total_updated = 0
     fetched = 0
