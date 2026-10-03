@@ -1,16 +1,30 @@
 """JobMatch backend — FastAPI entrypoint."""
-from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.db import init_db
 from app.routers import cv, jobs, match
+from app.scheduler import start_scheduler, stop_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: buat tabel, jalankan scheduler (fetch berkala + dedupe).
+    init_db()
+    start_scheduler(interval_hours=settings.fetch_interval_hours)
+    yield
+    # Shutdown.
+    stop_scheduler()
+
 
 app = FastAPI(
     title="JobMatch API",
     description="Job seeker automation: CV matching + job tracking",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS untuk frontend Next.js (Vercel) saat development & production.

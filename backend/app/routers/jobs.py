@@ -1,24 +1,19 @@
-"""Job listing endpoints.
+"""Job listing endpoints — baca dari DB (dipopulasi scheduler).
 
-`/fetch` menarik lowongan live dari sumber (JobStreet, Glints) dan
-mengembalikannya ternormalisasi. DB + scheduler menyusul di Fase berikutnya.
+`POST /api/jobs/refresh` memicu pengumpulan lowongan segera (fetch + embed +
+simpan). `GET /api/jobs` membaca yang sudah tersimpan.
 """
 from fastapi import APIRouter, Query
 
-from app.fetchers.glints import GlintsFetcher
-from app.fetchers.jobstreet import JobStreetFetcher
+from app.scheduler import collect_jobs
+from app.store import get_jobs
 
 router = APIRouter()
-
-FETCHERS = {
-    "jobstreet": JobStreetFetcher(),
-    "glints": GlintsFetcher(),
-}
 
 
 def _job_to_dict(job) -> dict:
     return {
-        "id": job.id,
+        "id": f"{job.source}:{job.external_id}",
         "source": job.source,
         "title": job.title,
         "company": job.company,
@@ -29,7 +24,7 @@ def _job_to_dict(job) -> dict:
         "job_type": job.job_type,
         "work_arrangement": job.work_arrangement,
         "description": job.description,
-        "skills": job.skills,
+        "skills": job.skills or [],
         "url": job.url,
         "posted_at": job.posted_at,
     }
@@ -38,15 +33,15 @@ def _job_to_dict(job) -> dict:
 @router.get("")
 async def list_jobs(
     source: str | None = Query(None, description="jobstreet | glints (kosong = semua)"),
-    keywords: str = Query("backend engineer"),
-    location: str = Query(""),
+    limit: int = Query(200, ge=1, le=1000),
 ) -> dict:
-    sources = [source] if source else list(FETCHERS)
-    results: list[dict] = []
-    for src in sources:
-        fetcher = FETCHERS.get(src)
-        if not fetcher:
-            continue
-        jobs = fetcher.fetch(keywords.split(), location=location)
-        results.extend(_job_to_dict(j) for j in jobs)
-    return {"count": len(results), "keywords": keywords, "jobs": results}
+    rows = get_jobs(limit=limit)
+    if source:
+        rows = [r for r in rows if r.source == source]
+    return {"count": len(rows), "jobs": [_job_to_dict(r) for r in rows]}
+
+
+@router.post("/refresh")
+async def refresh_jobs() -> dict:
+    """Trigger pengumpulan lowongan sekarang (blocking, bisa lambat saat model belum dimuat)."""
+    return collect_jobs()

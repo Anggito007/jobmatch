@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # Kunci preferensi lowongan default (bisa di-override per user nanti).
     default_keywords: list[str] = ["software engineer", "backend", "programmer"]
 
+    # Interval fetch scheduler (jam).
+    fetch_interval_hours: int = 6
+
 
 @lru_cache
 def get_settings() -> Settings:
