@@ -12,46 +12,22 @@ encoding embedding (blocking) di threadpool.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 
+from app.auth import get_optional_user
 from app.cv.extract import extract_text
-from app.cv.profile import build_profile
+from app.cv.profile import CVProfile, build_profile
 from app.matching.embedder import get_embedder
 from app.matching.scorer import job_skills, job_text, score_match
+from app.models import User
 from app.scheduler import collect_jobs
-from app.store import get_jobs
+from app.store import get_jobs, save_cv
 
 router = APIRouter()
 
 
-@router.post("")
-def match_cv(
-    file: UploadFile = File(...),
-    keywords: str = Form(""),       # opsional — seed pengumpulan bila DB kosong
-    location: str = Form(""),
-    source: str | None = Form(None),
-    top_n: int = Form(30),
-) -> dict:
-    # 1. Ekstrak CV → profil → embedding.
-    content = file.file.read()
-    text = extract_text(content, file.filename or "")
-    profile = build_profile(text)
-    embedder = get_embedder()
-    cv_vec = embedder.embed_one(profile.embedding_text)
-
-    # 2. Ambil pool lowongan dari DB (semua sumber, sudah di-embed scheduler).
-    rows = get_jobs(limit=5000)
-    if source:
-        rows = [r for r in rows if r.source == source]
-    if not rows:
-        # First run: kumpulkan broad dulu, lalu baca ulang.
-        kws = keywords.split() if keywords.strip() else []
-        collect_jobs(keywords=kws)
-        rows = get_jobs(limit=5000)
-        if source:
-            rows = [r for r in rows if r.source == source]
-
-    # 3. Score tiap lowongan (pakai embedding tersimpan; fallback re-embed).
+def score_rows(rows: list, profile: CVProfile, embedder, cv_vec: list[float]) -> list[dict]:
+    """Skor semua baris lowongan terhadap CV; kembalikan terurut skor menurun."""
     results: list[dict] = []
     for row in rows:
         jtext = job_text(row)
@@ -82,14 +58,59 @@ def match_cv(
                 "matched_skills": matched,
             }
         )
-
-    # 4. Urutkan menurun, lalu diversifikasi (batasi dominasi satu
-    #    perusahaan/sumber supaya top_n mewakili banyak sumber), potong top_n.
     results.sort(key=lambda r: r["score"], reverse=True)
+    return results
+
+
+@router.post("")
+def match_cv(
+    file: UploadFile = File(...),
+    keywords: str = Form(""),       # opsional — seed pengumpulan bila DB kosong
+    location: str = Form(""),
+    source: str | None = Form(None),
+    top_n: int = Form(30),
+    user: User | None = Depends(get_optional_user),
+) -> dict:
+    # 1. Ekstrak CV → profil → embedding.
+    content = file.file.read()
+    text = extract_text(content, file.filename or "")
+    profile = build_profile(text)
+    embedder = get_embedder()
+    cv_vec = embedder.embed_one(profile.embedding_text)
+
+    # 1b. Bila login, simpan profil CV ke akun (untuk digest & riwayat).
+    if user is not None:
+        save_cv(
+            filename=file.filename or "",
+            raw_text=text,
+            skills=profile.skills,
+            embedding=cv_vec,
+            user_id=user.id,
+            years_experience=profile.years_experience,
+            education=profile.education,
+            target_role=profile.target_role,
+        )
+
+    # 2. Ambil pool lowongan dari DB (semua sumber, sudah di-embed scheduler).
+    rows = get_jobs(limit=5000)
+    if source:
+        rows = [r for r in rows if r.source == source]
+    if not rows:
+        # First run: kumpulkan broad dulu, lalu baca ulang.
+        kws = keywords.split() if keywords.strip() else []
+        collect_jobs(keywords=kws)
+        rows = get_jobs(limit=5000)
+        if source:
+            rows = [r for r in rows if r.source == source]
+
+    # 3. Skor semua lowongan pool.
+    results = score_rows(rows, profile, embedder, cv_vec)
+
+    # 4. Diversifikasi (batasi dominasi satu perusahaan/sumber), potong top_n.
     results = _diversify(results, top_n)
 
     return {
-        "cv_skills": profile.skills,
+        "profile": profile.to_dict(),
         "count": len(results),
         "pool_size": len(rows),
         "keywords": keywords,

@@ -1,0 +1,24 @@
+DEWI LESTARI
+Data Analyst
+dewi.lestari@email.com | +62 813-9876-5432 | Bandung
+
+RINGKASAN
+Data Analyst dengan 5 tahun pengalaman mengolah data menjadi insight bisnis. Ahli dalam visualisasi data dan pembuatan dashboard.
+
+KEAHLIAN
+SQL, Python, Pandas, NumPy, Power BI, Tableau, Google BigQuery, ETL, Data Visualization, Statistics, Excel, Data Analysis
+
+PENGALAMAN
+PT Retail Sejahtera (2022 - sekarang)
+Data Analyst
+- Membangun dashboard penjualan harian dengan Power BI untuk 50 toko
+- Forecasting penjualan bulanan dengan Python (Pandas, NumPy)
+- ETL data dari berbagai sumber ke BigQuery
+
+Startup Analitik (2021 - 2022)
+Junior Data Analyst
+- Analisis data pelanggan untuk kampanye marketing
+- Laporan mingguan dengan Tableau
+
+PENDIDIKAN
+S1 Statistika, Universitas Padjadjaran (2017 - 2021)

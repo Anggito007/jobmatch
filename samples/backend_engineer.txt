@@ -1,0 +1,24 @@
+RIZKY PRATAMA
+Backend Engineer
+rizky.pratama@email.com | +62 812-3456-7890 | Jakarta
+
+RINGKASAN
+Backend Engineer dengan 6 tahun pengalaman membangun API, microservices, dan sistem pembayaran berskala tinggi. Terbiasa dengan Python dan Go, serta infrastruktur cloud.
+
+KEAHLIAN
+Python, Go, FastAPI, Django, PostgreSQL, MySQL, Redis, Docker, Kubernetes, AWS, REST API, gRPC, CI/CD, Git, Linux
+
+PENGALAMAN
+PT Nusantara Teknologi (2022 - sekarang)
+Backend Engineer
+- Merancang layanan pembayaran yang menangani 1 juta transaksi per hari
+- Optimasi query PostgreSQL dan caching Redis menurunkan latensi 40%
+- Menulis CI/CD pipeline dan deploy ke Kubernetes di AWS
+
+PT Digital Kreatif (2020 - 2022)
+Software Engineer
+- Membangun REST API dengan Python dan FastAPI untuk aplikasi mobile
+- Integrasi payment gateway dan notifikasi
+
+PENDIDIKAN
+S1 Teknik Informatika, Universitas Indonesia (2016 - 2020)

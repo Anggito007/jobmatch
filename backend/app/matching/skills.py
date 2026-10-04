@@ -1,13 +1,14 @@
 """Skill vocabulary + ekstraksi berbasis aturan.
 
-Untuk MVP, ekstraksi skill memakai daftar istilah terkurasi yang dicari
-(case-insensitive) dalam teks. Cukup untuk matching skill-overlap; nanti bisa
-diganti NER/LLM.
+Ekstraksi skill memakai daftar istilah terkurasi, dicocokkan dengan batas kata
+(case-insensitive) supaya tidak false-positive (mis. "Go" ≠ "Google", "AI" ≠
+"email"). Cukup untuk matching skill-overlap; nanti bisa diganti NER/LLM.
 """
 from __future__ import annotations
 
-# Istilah teknis umum (dicocokkan dengan batas kata) — meliputi backend,
-# frontend, data, devops, IoT (relevan untuk profil user: ESP32/LoRa).
+import re
+
+# Istilah teknis umum — meliputi backend, frontend, data, devops, IoT.
 SKILL_TERMS: list[str] = [
     # Bahasa & framework
     "Python", "JavaScript", "TypeScript", "Java", "Go", "Golang", "C++", "C#",
@@ -17,25 +18,24 @@ SKILL_TERMS: list[str] = [
     # Data / AI
     "Machine Learning", "Deep Learning", "NLP", "TensorFlow", "PyTorch",
     "Pandas", "NumPy", "Data Analysis", "Data Science", "LLM", "RAG",
-    "Embedding", "AI",
+    "Embedding", "AI", "Artificial Intelligence",
     # Infra / devops
     "Docker", "Kubernetes", "AWS", "GCP", "Azure", "CI/CD", "Git", "Linux",
     "DevOps", "Terraform", "Jenkins", "Nginx",
     # Database
     "PostgreSQL", "MySQL", "MongoDB", "Redis", "SQLite", "Elasticsearch",
-    # IoT / embedded (relevan user)
+    # IoT / embedded
     "IoT", "LoRa", "ESP32", "Arduino", "Raspberry Pi", "MQTT", "Embedded",
     "Sensor", "Microcontroller",
     # Soft skills / umum
     "REST API", "API", "Microservices", "Agile", "Scrum", "GitHub", "Testing",
 ]
 
-# Istilah yang dicari sebagai substring (multi-kata dengan variasi format).
-# Catatan: "C" dan "C++" dicari sebagai substring agar tidak false-positive
-# huruf tunggal "c" di kata lain.
-SKILL_SUBSTRINGS: list[str] = [
-    "node.js", "next.js", "c++", "c#", "rest api", "ci/cd",
-]
+
+def _matches(term: str, text_lower: str) -> bool:
+    """Cocokkan term dengan batas kata (lookaround alnum) supaya akurat."""
+    pattern = re.compile(rf"(?<![a-z0-9]){re.escape(term.lower())}(?![a-z0-9])")
+    return pattern.search(text_lower) is not None
 
 
 def extract_skills(text: str) -> list[str]:
@@ -47,13 +47,7 @@ def extract_skills(text: str) -> list[str]:
     seen: set[str] = set()
 
     for term in SKILL_TERMS:
-        if term.lower() in low:
-            key = term.lower()
-            if key not in seen:
-                seen.add(key)
-                found.append(term)
-    for term in SKILL_SUBSTRINGS:
-        if term in low:
+        if _matches(term, low):
             key = term.lower()
             if key not in seen:
                 seen.add(key)

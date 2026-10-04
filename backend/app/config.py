@@ -22,6 +22,18 @@ class Settings(BaseSettings):
     # Interval fetch scheduler (jam).
     fetch_interval_hours: int = 6
 
+    # Auth — lama sesi login (hari).
+    session_ttl_days: int = 30
+
+    # Email digest (Gmail SMTP). Kosongkan smtp_user/smtp_password untuk
+    # menonaktifkan pengiriman (digest tetap bisa dibangun, tidak dikirim).
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""       # email Gmail pengirim
+    smtp_password: str = ""   # App Password Gmail (bukan password biasa)
+    digest_from: str = ""     # default = smtp_user
+    digest_recipients: str = ""  # pisahkan koma bila banyak
+
 
 @lru_cache
 def get_settings() -> Settings:

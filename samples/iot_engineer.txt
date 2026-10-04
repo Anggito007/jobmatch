@@ -1,0 +1,24 @@
+BUDI SANTOSO
+IoT Engineer
+budi.santoso@email.com | +62 811-2233-4455 | Yogyakarta
+
+RINGKASAN
+IoT Engineer dengan 5 tahun pengalaman membangun sistem monitoring berbasis sensor, LoRa, dan ESP32 untuk sektor pertanian dan industri.
+
+KEAHLIAN
+C, C++, Python, ESP32, Arduino, LoRa, MQTT, Raspberry Pi, Embedded, Sensor, Microcontroller, PCB Design, IoT
+
+PENGALAMAN
+PT Agro Teknologi (2022 - sekarang)
+IoT Engineer
+- Merancang sistem monitoring hidroponik berbasis ESP32 dan LoRa untuk 20 greenhouse
+- Pengiriman data sensor (suhu, kelembaban, pH) via MQTT ke server
+- Desain PCB untuk node sensor bertenaga baterai
+
+CV Karya Mandiri (2021 - 2022)
+Embedded Developer
+- Firmware Arduino dan ESP32 untuk alat ukur industri
+- Integrasi sensor dan aktuator
+
+PENDIDIKAN
+S1 Teknik Komputer, Universitas Komputer Indonesia (2017 - 2021)

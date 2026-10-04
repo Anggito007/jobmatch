@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -46,14 +46,67 @@ class Job(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class User(Base):
+    """Akun pengguna (auth)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AuthSession(Base):
+    """Sesi login (opaque token)."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Feedback(Base):
+    """Feedback relevansi lowongan (👍/👎) — bahan data untuk reranker kelak."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    job_source: Mapped[str] = mapped_column(String(32))
+    job_external_id: Mapped[str] = mapped_column(String(64))
+    is_relevant: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class SavedJob(Base):
+    """Lowongan yang disimpan/ditandai status lamaran user."""
+
+    __tablename__ = "saved_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    job_source: Mapped[str] = mapped_column(String(32))
+    job_external_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="saved")  # saved | applied
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class CVProfile(Base):
-    """CV pengguna (untuk MVP: 1 CV, yang terbaru menang)."""
+    """CV pengguna (untuk MVP: 1 CV aktif per user, yang terbaru menang)."""
 
     __tablename__ = "cv_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     filename: Mapped[str] = mapped_column(String(255), default="")
     raw_text: Mapped[str] = mapped_column(Text, default="")
     skills: Mapped[list] = mapped_column(JSON, default=list)
+    years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    education: Mapped[str] = mapped_column(String(64), default="")
+    target_role: Mapped[str] = mapped_column(String(128), default="")
     embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

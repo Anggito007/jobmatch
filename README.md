@@ -49,13 +49,27 @@ Buka http://localhost:8000/docs untuk API docs.
 
 ## API endpoints
 
-| Method | Path | Fungsi |
-|---|---|---|
-| GET | `/health` | Cek status |
-| POST | `/api/cv/upload` | Upload CV (PDF/DOCX) → ekstrak teks |
-| POST | `/api/jobs/refresh` | Fetch + embed + simpan pool lowongan (dedupe) |
-| GET | `/api/jobs` | Baca lowongan tersimpan (filter `source`, `limit`) |
-| POST | `/api/match` | Upload CV → matching terhadap pool (skor + urutkan) |
+| Method | Path | Fungsi | Auth |
+|---|---|---|---|
+| GET | `/health` | Cek status | — |
+| POST | `/api/cv/upload` | Upload CV (PDF/DOCX) → ekstrak teks | — |
+| POST | `/api/jobs/refresh` | Fetch + embed + simpan pool lowongan (dedupe) | — |
+| GET | `/api/jobs` | Baca lowongan tersimpan (filter `source`, `limit`) | — |
+| POST | `/api/match` | Upload CV → matching terhadap pool (skor + urutkan) | opsional |
+| POST | `/api/auth/register` | Daftar akun | — |
+| POST | `/api/auth/login` | Masuk → token | — |
+| GET | `/api/auth/me` | Info akun aktif | ✅ |
+| POST | `/api/feedback` | Tandai lowongan relevan/tidak (👍/👎) | ✅ |
+| GET / POST / DELETE | `/api/saved` | Simpan / lihat / hapus lowongan + status lamaran | ✅ |
+| POST | `/api/digest` | Kirim email digest lowongan cocok (Gmail SMTP) | ✅ |
+
+Auth pakai header `Authorization: Bearer <token>`.
+
+## Sampel CV untuk pengujian
+
+Di `samples/` ada 3 CV sampel (`.txt` + `.docx`): `backend_engineer`,
+`data_analyst`, `iot_engineer`. Regenerate kapan saja dengan:
+`python samples/make_test_cvs.py`.
 
 ## Verifikasi
 
