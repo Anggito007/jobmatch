@@ -22,7 +22,9 @@ apscheduler>=3.11
 pdfplumber>=0.11
 python-docx>=1.1
 
-# ===== Matching (semantic embedding) =====
-# torch: wheel CPU di PyPI (default Windows = CPU). cp314 tersedia sejak 2.14.
-torch>=2.14
-sentence-transformers>=3.3
+# ===== Matching (semantic embedding) — fastembed (ringan, tanpa torch) =====
+# fastembed pakai ONNX runtime, total <200MB → muat di Render free tier (512MB).
+# Model-nya SAMA dengan versi torch (paraphrase-multilingual-MiniLM-L12-v2),
+# jadi akurasi tidak turun. Backend torch tetap didukung otomatis bila diinstall
+# (lihat requirements-torch.txt) untuk kualitas maksimal di VPS/Oracle.
+fastembed>=0.8

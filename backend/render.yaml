@@ -1,7 +1,10 @@
-# Render Blueprint — deploy backend gratis.
-# CATATAN PENTING: free tier Render = 512MB disk + 512MB RAM.
-# Backend ini pakai torch (~500MB) + model embedding (~470MB) = ~1GB → TIDAK
-# muat di free tier. Baca DEPLOYMENT.md sebelum deploy.
+# Render Blueprint — deploy backend ke Render (free tier).
+#
+# Catatan free tier:
+# - Disk 512MB (ephemeral, hilang saat tidur). Image fastembed ~<400MB → muat.
+# - Service tidur setelah 15 menit idle → cold start ~1 menit.
+# - SQLite (default) bersifat sementara. Untuk data persistent, set
+#   DATABASE_URL ke Neon/Supabase Postgres (gratis) sebelum deploy.
 
 services:
   - type: web
@@ -10,11 +13,10 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL
-        value: sqlite:////var/data/jobmatch.db
       - key: CORS_ORIGINS
-        value: https://your-frontend.vercel.app
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 1
+        value: "*"
+      - key: FETCH_INTERVAL_HOURS
+        value: "6"
+      # Ganti ke URL Postgres Neon bila ingin data persistent:
+      - key: DATABASE_URL
+        value: sqlite:////app/jobmatch.db

@@ -1,0 +1,9 @@
+# Requirements tambahan untuk kualitas maksimal (torch + sentence-transformers).
+# PAKAI INI di VPS/Oracle bila ingin backend torch penuh:
+#   pip install -r requirements.txt -r requirements-torch.txt
+#
+# Embedder otomatis memakai torch bila sentence-transformers terinstall,
+# dan fastembed bila tidak. Model-nya sama, hasil setara.
+
+torch>=2.14
+sentence-transformers>=3.3

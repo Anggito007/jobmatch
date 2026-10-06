@@ -7,10 +7,10 @@ from app.matching.embedder import get_embedder
 
 
 def main() -> None:
-    print("Memuat model embedding (unduh ~470MB jika belum ada cache)...")
+    print("Memuat model embedding (unduh model ONNX ~118MB jika belum ada cache)...")
     emb = get_embedder()
     vec = emb.embed_one("Backend engineer Python FastAPI IoT")
-    print(f"Model siap. Dimensi vektor: {len(vec)}")
+    print(f"Model siap (backend: {emb.backend}). Dimensi vektor: {len(vec)}")
     print(f"Contoh 5 nilai pertama: {vec[:5]}")
 
 
