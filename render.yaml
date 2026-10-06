@@ -1,0 +1,27 @@
+# Render Blueprint — file ini HARUS berada di ROOT repo (bukan di backend/).
+# Render "New → Blueprint" otomatis mendeteksi `render.yaml` di root dan
+# membacanya. Service name di bawah ini yang muncul di dashboard Render.
+#
+# Catatan free tier:
+# - Disk 512MB (ephemeral). Image fastembed ~<400MB → muat.
+# - Service tidur setelah 15 menit idle → cold start ~1 menit.
+# - SQLite (default) sementara. Untuk data persistent set DATABASE_URL ke
+#   Neon/Supabase Postgres (gratis) sebelum deploy.
+
+services:
+  - type: web
+    name: jobmatch-backend
+    runtime: docker
+    repo: https://github.com/Anggito007/jobmatch
+    plan: free
+    healthCheckPath: /health
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    envVars:
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: FETCH_INTERVAL_HOURS
+        value: "6"
+      # Ganti ke URL Postgres Neon bila ingin data persistent:
+      - key: DATABASE_URL
+        value: sqlite:////app/jobmatch.db
