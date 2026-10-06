@@ -1,191 +1,123 @@
-# Job Seeker Automation — Rencana Implementasi
+# JobMatch — Rencana Pengembangan Lanjutan
 
-> **Goal:** Web app multi-pengguna yang menerima upload CV (PDF/DOCX), otomatis memantau lowongan kerja dari beberapa portal (JobStreet, Glints, LinkedIn, dll.), dan menampilkan lowongan yang cocok secara semantik dengan skor + alasan kecocokan.
+Status: backend + frontend MVP jalan, 6 sumber lowongan, matching semantik,
+auth, save/feedback, email digest. Hosting ditunda (lihat DEPLOYMENT.md).
 
-**Architecture:** Backend Python (FastAPI) dengan pola *adapter* per sumber lowongan (semua hasil dinormalisasi ke satu schema `Job`), CV di-embed dan dibandingkan cosine similarity terhadap embedding lowongan, job di-fetch berkala oleh scheduler dan di-dedupe. Frontend dashboard menampilkan lowongan terurut skor.
-
-**Tech Stack:** Python 3.11+, FastAPI + Uvicorn, SQLite (MVP) → PostgreSQL + pgvector (produksi), sentence-transformers (embedding multibahasa), httpx (fetch), APScheduler (jadwal), Jinja2 + HTMX (frontend MVP) → React (opsional polish).
-
----
-
-## Keputusan yang sudah diambil
-
-| Aspek | Keputusan |
-|---|---|
-| Bentuk | Web app + dashboard |
-| Stack | Python (rekomendasi) |
-| Tujuan | Pribadi + portofolio, bisa diakses publik |
-| Matching | Semantic (embedding), bukan keyword saja |
+Prioritas disusun berdasarkan dampak nyata ke kualitas & kelayakan produk,
+bukan kemudahan implementasi.
 
 ---
 
-## 1. Arsitektur
+## PRIORITAS 1 — Kualitas matching (paling berdampak)
 
-```
-┌─────────────┐   upload CV (PDF/DOCX)    ┌──────────────┐
-│   Browser   │ ─────────────────────────▶│   FastAPI    │
-│ (Dashboard) │ ◀─── JSON lowongan+skor ──│   Backend    │
-└─────────────┘                            └──────┬───────┘
-                                                  │
-              ┌──────────────────┬────────────────┼─────────────┐
-              ▼                  ▼                ▼             ▼
-        ┌──────────┐      ┌──────────┐     ┌──────────┐  ┌───────────┐
-        │ JobStreet│      │  Glints  │     │ LinkedIn │  │ Dealls/…  │
-        │ (JSON API)│      │(GraphQL) │     │(guest API)│  │(HTML)     │
-        └──────────┘      └──────────┘     └──────────┘  └───────────┘
-              └──────────────────┬────────────────┘
-                                 ▼
-                        ┌─────────────────┐
-                        │  Normalizer →   │
-                        │  Unified `Job`  │──▶ SQLite/Postgres
-                        └─────────────────┘
-                                 │
-                        ┌─────────────────┐
-                        │ Embedder +      │
-                        │ cosine sim      │──▶ skor + alasan cocok
-                        └─────────────────┘
-```
+Masalah nyata yang sudah terlihat dari pengujian: beberapa sumber (Glints,
+Kalibrr, Karir, Dealls) hanya memberi JUDUL tanpa deskripsi lengkap, sehingga
+embedding-nya dangkal dan skor jadi bias. Lowongan dari TechInAsia (punya
+deskripsi penuh) otomatis lebih mendominasi hasil.
 
-### Komponen
+### 1.1 Ambil deskripsi lowongan lengkap
+- Glints: temukan query GraphQL detail job (field deskripsi belum ketemu) ATAU
+  scrape halaman `glints.com/id/opportunities/jobs/<id>`.
+- Kalibrr, Karir, Dealls: fetch halaman detail per job untuk ambil deskripsi.
+- Efek: embedding jauh lebih akurat, semua sumber setara.
 
-1. **CV Ingestion** — upload PDF/DOCX → ekstrak teks (`pdfplumber`, `python-docx`) → ekstrak profil terstruktur (skills, jabatan, pengalaman, pendidikan) → embed.
-2. **Job Fetchers (adapters)** — satu kelas per sumber, interface seragam `fetch(keywords) -> list[Job]`.
-3. **Scheduler** — `APScheduler`, fetch berkala (per jam/hari), dedupe by `source + external_id`.
-4. **Matching Engine** — embed judul+deskripsi lowongan, cosine similarity vs embedding CV, ditambah skor overlap skill eksplisit.
-5. **Dashboard** — daftar lowongan terurut skor, filter (lokasi/jenis/sumber), simpan, link apply.
-6. **Notifikasi** (opsional) — email digest harian.
+### 1.2 Reranker (naikkan kualitas ranking)
+- Saat ini skor = 0.45·cosine + 0.30·skill + 0.25·lexical (bobot manual).
+- Tingkatkan: gunakan data feedback 👍/👎 yang sudah terkumpul untuk melatih
+  reranker sederhana, atau paling tidak jadikan feedback mempengaruhi ranking
+  (job yang sering 👎 ditekan bobotnya).
+
+### 1.3 Kalibrasi skor per sumber
+- Normalisasi supaya satu sumber tidak mendominasi top-N hanya karena deskripsi
+  panjang. Cek distribusi skor per sumber, tambah normalisasi bila timpang.
 
 ---
 
-## 2. Sumber Lowongan (prioritas berdasarkan kemudahan & legalitas)
+## PRIORITAS 2 — Parsing CV lebih pintar
 
-| Sumber | Cara akses | Auth | Risiko |
-|---|---|---|---|
-| **JobStreet** (`id.jobstreet.com`) | Public JSON API `GET /api/chalice-search/v4/search?siteKey=ID-Main&keywords=…&location=…` (grup SEEK) | Tanpa key | Rendah — start dari sini |
-| **Glints** (`glints.com/id`) | Public GraphQL `POST /api/graphql` (schema reverse-engineered) | Tanpa auth | Rendah–sedang |
-| **LinkedIn** | Guest jobs API `jobs-guest/jobs/api/seeMoreJobPostings/search` | Tanpa login | **Tinggi** — ToS + anti-bot, jadikan opsional |
-| Dealls, Karir.com | HTML scraping (Playwright/httpx) | — | Sedang — fase lanjut |
-| Kalibrr, KitaLulus | API internal terkunci / app-only | — | Skip dulu (perlu Playwright/proxy) |
+### 2.1 Ekstrak lebih banyak field
+- Perusahaan & jabatan tiap pengalaman kerja.
+- Tahun mulai-selesai (sudah ada total, belum per-jabatan).
+- IPK, skill level (beginner/intermediate/advanced) kalau tertulis.
 
-Referensi implementasi nyata: repo `ceroberoz/id-jobs` dan `santifer/career-ops` (dokumentasi endpoint publik yang sama).
+### 2.2 Handle format CV yang berantakan
+- CV PDF yang pakai kolom (dua kolom), tabel, atau layout kompleks sering gagal
+  diekstrak rapi. Uji dengan beberapa CV asli, perbaiki extractor.
 
-**Unified `Job` schema:**
-
-```python
-{
-  "id": "jobstreet:ab12cd",       # source + external_id
-  "source": "jobstreet",
-  "title": "Backend Engineer",
-  "company": "PT Contoh",
-  "location": "Bandung",
-  "salary_min": 5000000, "salary_max": 8000000, "currency": "IDR",
-  "job_type": "Full-time", "work_arrangement": "Hybrid",
-  "description": "...", "requirements": "...",
-  "skills": ["Python", "FastAPI", "PostgreSQL"],
-  "url": "https://...",           # link apply
-  "posted_at": "2026-09-28T00:00:00Z",
-  "fetched_at": "2026-09-30T09:00:00Z"
-}
-```
+### 2.3 (Opsional) NER dengan model
+- Kalau mau "pakai ML lebih dalam" untuk portofolio: fine-tune model kecil
+  (XLM-R) untuk deteksi skill/jabatan/pendidikan dari CV Indonesia. Butuh
+  dataset berlabel (bisa dibangun dari feedback + CV sampel).
 
 ---
 
-## 3. Matching Engine
+## PRIORITAS 3 — Fitur produk
 
-1. CV dipadatkan jadi satu teks: `skills + jabatan target + ringkasan`.
-2. Embed pakai **sentence-transformers** model multibahasa `paraphrase-multilingual-MiniLM-L12-v2` (mendukung Bahasa Indonesia + Inggris, gratis, jalan lokal — tanpa biaya API).
-3. Tiap lowongan di-embed dari `title + description + requirements`.
-4. **Skor = cosine similarity(cv_vec, job_vec)** dinormalisasi 0–1, dikombinasi dengan **skill-overlap score** (skill CV ∩ skill lowongan) sebagai sinyal kedua.
-5. Dashboard menampilkan **"kenapa cocok"**: daftar skill yang match + kalimat dari deskripsi yang paling relevan.
+### 3.1 Detail lowongan
+- Klik kartu → halaman/modal detail: deskripsi penuh, requirements, tombol apply.
 
-Catatan biaya: embedding lokal = gratis. Upgrade ke OpenAI/embedding API lain opsional, tinggal ganti backend embedder.
+### 3.2 Riwayat & statistik
+- Grafik tren: jumlah lowongan baru per minggu, per sumber, per kategori.
+- (Bagus untuk portofolio — ada visualisasi.)
 
----
+### 3.3 Filter & sort di dashboard
+- Filter lokasi, sumber, jenis pekerjaan, rentang gaji.
+- Sort: skor / tanggal / gaji.
 
-## 4. Struktur Proyek
-
-```
-jobseeker-automation/
-├── app/
-│   ├── main.py               # FastAPI app + routes
-│   ├── config.py             # env, settings
-│   ├── models.py             # SQLAlchemy models (User, Job, Match)
-│   ├── schemas.py            # Pydantic
-│   ├── db.py                 # session
-│   ├── cv/
-│   │   ├── extract.py        # PDF/DOCX → teks
-│   │   └── profile.py        # ekstrak skills/jabatan/pengalaman
-│   ├── fetchers/
-│   │   ├── base.py           # interface adapter
-│   │   ├── jobstreet.py
-│   │   ├── glints.py
-│   │   └── linkedin.py       # opsional
-│   ├── matching/
-│   │   ├── embedder.py       # sentence-transformers wrapper
-│   │   └── scorer.py         # cosine + skill overlap
-│   ├── scheduler.py          # APScheduler jobs
-│   └── templates/            # Jinja2 dashboard
-├── tests/
-├── requirements.txt
-└── Dockerfile
-```
+### 3.4 Notifikasi (lanjutan)
+- Email digest sudah ada tapi belum diaktifkan SMTP. Tambah: Telegram bot
+  (opsional, user minta) bila mau.
 
 ---
 
-## 5. Roadmap (fase)
+## PRIORITAS 4 — Kualitas & teknis
 
-### Fase 0 — Setup (rangkai kerangka)
-Buat venv, `requirements.txt`, FastAPI "hello", struktur folder, git init. **Kriteria:** `uvicorn app.main:app` jalan, `/health` 200.
+### 4.1 Tes otomatis
+- Belum ada test suite. Tambah pytest untuk: ekstraksi skill, scoring, fetcher
+  parser (pakai fixture JSON), auth.
 
-### Fase 1 — MVP (1 sumber + 1 user)
-- CV upload PDF/DOCX → ekstrak teks + skills.
-- Fetcher **JobStreet** (JSON API) → simpan ke SQLite.
-- Embedding + cosine matching → skor.
-- Dashboard sederhana (Jinja2 + HTMX): upload CV, lihat lowongan terurut skor.
-- Scheduler fetch harian + dedupe.
-**Kriteria:** upload CV nyata → muncul daftar lowongan JobStreet dengan skor relevan.
+### 4.2 Error handling & retry
+- Fetcher kadang gagal (rate limit, timeout). Tambah retry + fallback.
 
-### Fase 2 — Tambah sumber
-- Fetcher **Glints** (GraphQL) + normalisasi.
-- **LinkedIn** (opsional, rate rendah, toggled off by default).
-- Pindah SQLite → PostgreSQL + pgvector, FAISS opsional.
-- "Kenapa cocok" (highlight skill + kalimat relevan).
-
-### Fase 3 — Multi-pengguna + notifikasi + deploy
-- Auth (register/login JWT), CV per user, preferensi (kata kunci, lokasi).
-- Email digest harian (opsional).
-- Docker + deploy ke Render/Railway/Fly.io (free tier) atau VPS.
-- (Opsional) React frontend untuk polish portofolio.
+### 4.3 Observability
+- Logging terstruktur, metrik sederhana (berapa job difetch, berapa gagal).
 
 ---
 
-## 6. Risiko & mitigasi
+## PRIORITAS 5 — Sumber tambahan (setelah inti stabil)
 
-| Risiko | Mitigasi |
-|---|---|
-| LinkedIn ToS/anti-bot → akun/ip diblokir | Jadikan opsional, rate rendah, prioritaskan JobStreet+Glints |
-| Endpoint API (undocumented) berubah tiba-tiba | Pola adapter → kerusakan terisolasi per sumber |
-| Biaya embedding/LLM | sentence-transformers lokal (gratis); API eksternal opsional |
-| Biaya hosting (target publik) | Free tier (Render/Railway/Fly), Postgres free (Neon/Supabase) |
-| Duplikasi lowongan antar fetch | Dedupe by `source+external_id`, upsert |
+- LinkedIn (opsional, ToS ketat — perlu Playwright + rate rendah).
+- Aggregator global (Jooble/Adzuna) bila mau cakupan internasional.
+- Sumber niche Indonesia lain: Karirpad, Urbanhire, dsb. (evaluasi dulu API-nya).
 
 ---
 
-## 7. Keputusan final
+## Yang TIDAK saya sarankan sekarang
 
-| # | Topik | Keputusan |
-|---|---|---|
-| 1 | Nama produk | **JobMatch** |
-| 2 | Notifikasi | Dashboard dulu; email (Gmail) menyusul setelah core stabil |
-| 3 | Frontend | **Next.js (React) + TypeScript** — standar proper, mulus di Vercel |
-| 4 | Hosting | **Frontend → Vercel (gratis)** · **Backend → Render/Railway free tier** · **DB → Neon/Supabase Postgres (gratis)** |
+- Deploy (ditunda — kamu yang minta).
+- Auth sosial (Google/GitHub OAuth) — belum perlu, auth email cukup.
+- Pindah ke microservices — overkill untuk tahap ini.
+- ML model raksasa (BERT-large, LLM untuk matching) — biaya & latensi tidak
+  sebanding dengan manfaat di tahap ini.
 
-> Catatan arsitektur penting: Vercel hanya untuk frontend. Backend (scheduler + embedding + scraping) TIDAK bisa di Vercel karena butuh proses berjalan terus, model AI ~100MB+, dan scraping durasi panjang — harus di Render/Railway (free tier). Dua deployment + satu Postgres, semua gratis.
+---
 
-**Struktur repo final:**
+## Urutan eksekusi yang saya rekomendasikan
 
-```
-jobseeker-automation/
-├── backend/            # FastAPI (Python) — API, scraper, matching, scheduler
-└── frontend/           # Next.js (React/TS) — dashboard, deploy Vercel
-```
+1. **1.1** (deskripsi lengkap) — karena ini yang paling besar efeknya ke akurasi,
+   dan sudah ketahuan masalahnya dari uji coba.
+2. **4.1** (test) — sebelum fitur makin banyak, kunci dulu perilaku yang sudah benar.
+3. **1.2 + 1.3** (reranker + kalibrasi) — pakai data feedback.
+4. **2.1 + 2.2** (parsing CV) — biar tahan CV format macam-macam.
+5. **3.1 + 3.3** (detail + filter) — polish UX.
+6. **3.2** (statistik) — bahan portofolio.
+
+---
+
+## Open questions untuk user
+
+1. Prioritas utama: akurasi matching dulu, atau fitur UX (detail/filter) dulu?
+2. Feedback 👍/👎 mau dipakai untuk apa: sekadar tombol, atau beneran mempengaruhi
+   ranking & jadi data training reranker?
+3. Untuk 2.3 (NER/ML), kamu mau serius melatih model sendiri (untuk nilai
+   portofolio), atau cukup aturan/regex yang baik?
