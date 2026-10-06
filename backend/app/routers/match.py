@@ -32,14 +32,16 @@ router = APIRouter()
 def build_target(profile: CVProfile, preference: str, embedder, pref_weight: float):
     """Bangun target pencarian = gabungan CV + preferensi.
 
-    Return (target_vec, target_skills, target_text).
-    - Tanpa preferensi: identik dengan CV.
-    - Dengan preferensi: vektor di-blend (preferensi dominan), skill preferensi
-      ditambahkan, teks preferensi disertakan untuk sinyal leksikal.
+    Return (target_vec, target_skills, target_text, pref_tokens).
+    - Tanpa preferensi: identik dengan CV, pref_tokens kosong.
+    - Dengan preferensi: vektor di-blend, skill preferensi ditambahkan, teks
+      disertakan, dan `pref_tokens` (kata kunci preferensi + skill-nya) dipakai
+      untuk BOOST leksikal tegas saat scoring.
     """
     cv_vec = embedder.embed_one(profile.embedding_text)
     skills = list(profile.skills)
     text = profile.embedding_text
+    pref_tokens: list[str] = []
 
     preference = (preference or "").strip()
     if preference:
@@ -52,13 +54,45 @@ def build_target(profile: CVProfile, preference: str, embedder, pref_weight: flo
                 seen.add(s.lower())
                 skills.append(s)
         text = f"{text} {preference}"
+        # Kumpulkan token preferensi bermakna untuk boost leksikal.
+        pref_tokens = _pref_keywords(preference, pref_skills)
 
-    return cv_vec, skills, text
+    return cv_vec, skills, text, pref_tokens
+
+
+def _pref_keywords(preference: str, pref_skills: list[str]) -> list[str]:
+    """Token kunci dari preferensi: skill terdeteksi + kata penting (>2 huruf)."""
+    from app.matching.scorer import _tokens
+
+    tokens = set(t.lower() for t in _tokens(preference))
+    for s in pref_skills:
+        tokens.add(s.lower())
+    # Buang kata generik agar boost tidak kena semua lowongan.
+    generic = {"engineer", "developer", "position", "role", "job", "kerja",
+               "posisi", "bidang", "yang", "mau", "ingin", "saya", "di", "dan",
+               "experience", "senior", "junior", "staff"}
+    return [t for t in tokens if t not in generic and len(t) > 2]
+
+
+def _pref_boost(job, jtext: str, jskills: list[str], pref_tokens: list[str]) -> float:
+    """Boost tegas bila lowongan menyebut kata kunci preferensi.
+
+    Hitung berapa token preferensi yang muncul di judul/skill/deskripsi lowongan.
+    Tiap kemunculan menambah bobot, sehingga lowongan yang memang sesuai
+    preferensi (mis. IoT) naik jauh di atas yang tidak.
+    """
+    if not pref_tokens:
+        return 0.0
+    hay = f"{job.title} {' '.join(jskills)} {jtext}".lower()
+    hits = sum(1 for t in pref_tokens if t in hay)
+    # 0 hit = 0; tiap hit menambah 0.08, maksimal 0.30 (agar tidak meledak).
+    return min(0.30, 0.08 * hits)
 
 
 def score_rows(rows: list, target_vec: list[float], target_skills: list[str],
-               target_text: str, embedder) -> list[dict]:
+               target_text: str, embedder, pref_tokens: list[str] | None = None) -> list[dict]:
     """Skor semua baris lowongan terhadap target; kembalikan terurut skor menurun."""
+    pref_tokens = pref_tokens or []
     results: list[dict] = []
     for row in rows:
         jtext = job_text(row)
@@ -70,6 +104,8 @@ def score_rows(rows: list, target_vec: list[float], target_skills: list[str],
             list(target_vec), list(jvec), target_skills, jskills,
             cv_text=target_text, job_text_str=jtext,
         )
+        # Boost leksikal preferensi (tegas, bukan sekadar geser vektor).
+        score = min(1.0, score + _pref_boost(row, jtext, jskills, pref_tokens))
         results.append(
             {
                 "id": f"{row.source}:{row.external_id}",
@@ -113,7 +149,7 @@ def match_cv(
     embedder = get_embedder()
 
     # 2. Bangun target pencarian (CV + preferensi).
-    target_vec, target_skills, target_text = build_target(
+    target_vec, target_skills, target_text, pref_tokens = build_target(
         profile, preference, embedder, preference_weight
     )
 
@@ -141,8 +177,8 @@ def match_cv(
         if source:
             rows = [r for r in rows if r.source == source]
 
-    # 4. Skor semua lowongan terhadap target.
-    results = score_rows(rows, target_vec, target_skills, target_text, embedder)
+    # 4. Skor semua lowongan terhadap target (termasuk boost preferensi).
+    results = score_rows(rows, target_vec, target_skills, target_text, embedder, pref_tokens)
 
     # 5. Diversifikasi + potong top_n.
     results = _diversify(results, top_n)
