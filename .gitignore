@@ -28,3 +28,4 @@ Thumbs.db
 # Upload / artifacts
 data/
 *.log
+backend/glints_detail.html
