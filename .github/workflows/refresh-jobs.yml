@@ -1,0 +1,33 @@
+# "Jam beker" eksternal untuk JobMatch backend.
+#
+# Masalah: backend di free tier (SnapDeploy/Railway) TIDUR saat idle, dan
+# scheduler APScheduler yang jalan di dalam proses ikut mati → lowongan tidak
+# ter-fetch saat tidur.
+#
+# Solusi: GitHub Actions (gratis & unlimited untuk repo PUBLIC) bertindak
+# sebagai cron eksternal. Tiap beberapa jam ia memanggil POST /api/jobs/refresh
+# yang MEMBANGUNKAN service + memicu fetch lowongan terbaru.
+#
+# Cara set:
+#   Settings → Secrets and variables → Actions → Variables:
+#     BACKEND_URL = https://<url-backend-kamu>   (tanpa / di akhir)
+
+name: refresh-jobs
+
+on:
+  schedule:
+    # Tiap 6 jam (UTC). Minimal interval GitHub = 5 menit; boleh diubah.
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}  # bisa jalan manual dari tab Actions
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Panggil endpoint refresh (bangunkan + fetch lowongan)
+        run: |
+          URL="${{ vars.BACKEND_URL }}/api/jobs/refresh"
+          echo "Refresh: $URL"
+          # Timeout 5 menit (cold start ~1-2 menit + fetch).
+          curl -sS -m 300 -X POST "$URL" || exit 1
+          echo "Refresh selesai."
