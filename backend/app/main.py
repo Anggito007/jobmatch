@@ -28,13 +28,24 @@ app = FastAPI(
 )
 
 # CORS untuk frontend Next.js (Vercel) saat development & production.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Bila CORS_ORIGINS berisi "*", izinkan semua origin (tanpa cookies — auth
+# pakai Bearer token, bukan cookie, jadi aman).
+if "*" in settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(cv.router, prefix="/api/cv", tags=["cv"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
