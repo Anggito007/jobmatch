@@ -42,6 +42,25 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
+def blend_vectors(a: list[float], b: list[float], weight_b: float) -> list[float]:
+    """Gabungkan dua vektor ternormalisasi.
+
+    result = (1 - weight_b) * a + weight_b * b, lalu dinormalisasi ulang.
+    Dipakai untuk menggabungkan vektor CV ("siapa saya") dengan vektor
+    preferensi/target posisi ("mau ke mana"), sehingga pencarian bisa
+    dikemudikan ke arah yang diinginkan user walau beda dari skill CV.
+    """
+    import numpy as np
+
+    va = np.asarray(a, dtype="float32")
+    vb = np.asarray(b, dtype="float32")
+    out = (1.0 - weight_b) * va + weight_b * vb
+    n = float(np.linalg.norm(out))
+    if n > 0:
+        out = out / n
+    return out.tolist()
+
+
 def lexical_overlap(cv_tokens: set[str], job_tokens: set[str], title_tokens: set[str]) -> float:
     """Overlap leksikal (recall): berapa token CV yang muncul di job (judul 2x)."""
     if not cv_tokens:

@@ -41,7 +41,14 @@ def digest(user: User = Depends(get_current_user), top_n: int = 10) -> dict:
         education=cv.education,
         target_role=cv.target_role,
     )
-    results = score_rows(rows, profile, embedder, list(cv.embedding))
+    # Digest tanpa preferensi — target = CV apa adanya.
+    results = score_rows(
+        rows,
+        target_vec=list(cv.embedding),
+        target_skills=profile.skills,
+        target_text=profile.embedding_text,
+        embedder=embedder,
+    )
 
     html = build_digest_html(results, top_n=top_n)
 

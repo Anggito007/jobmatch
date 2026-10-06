@@ -56,6 +56,9 @@ export interface CVProfile {
   years_experience: number | null;
   education: string;
   target_role: string;
+  preference: string;
+  preference_weight: number;
+  target_skills: string[];
 }
 
 export interface MatchResponse {
@@ -113,11 +116,18 @@ async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 // --- Matching ---
-export async function matchCv(file: File, keywords: string, location: string, topN: number): Promise<MatchResponse> {
+export async function matchCv(
+  file: File,
+  keywords: string,
+  location: string,
+  preference: string,
+  topN: number,
+): Promise<MatchResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("keywords", keywords);
   form.append("location", location);
+  form.append("preference", preference);
   form.append("top_n", String(topN));
   return apiJson<MatchResponse>("/api/match", { method: "POST", body: form });
 }

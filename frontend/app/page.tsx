@@ -21,6 +21,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [keywords, setKeywords] = useState("");
   const [location, setLocation] = useState("");
+  const [preference, setPreference] = useState("");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [result, setResult] = useState<MatchResponse | null>(null);
@@ -77,7 +78,7 @@ export default function Home() {
     setError(null);
     setResult(null);
     try {
-      const res = await matchCv(file, keywords, location, 30);
+      const res = await matchCv(file, keywords, location, preference, 30);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
@@ -179,12 +180,12 @@ export default function Home() {
         <CvUpload file={file} onFile={setFile} />
         <div className="form-row">
           <div className="field">
-            <label htmlFor="kw">Kata kunci (opsional — CV jadi filter utama)</label>
+            <label htmlFor="pref">Posisi / bidang yang kamu incar (opsional)</label>
             <input
-              id="kw"
-              value={keywords}
-              onChange={(e) => setKeywords(e.target.value)}
-              placeholder="kosongkan untuk scan semua lowongan"
+              id="pref"
+              value={preference}
+              onChange={(e) => setPreference(e.target.value)}
+              placeholder="mis. IoT Engineer, Embedded, ESP32 — kosongkan untuk mengikuti CV"
             />
           </div>
           <div className="field">
@@ -283,6 +284,14 @@ export default function Home() {
                     {s}
                   </span>
                 ))}
+              </div>
+            </div>
+          )}
+          {result.profile.preference && (
+            <div className="result-meta">
+              <span className="count">🎯 Target pencarian:</span>
+              <div className="chips">
+                <span className="chip">{result.profile.preference}</span>
               </div>
             </div>
           )}
