@@ -4,6 +4,7 @@ from __future__ import annotations
 import httpx
 
 from .base import BaseFetcher, Job
+from .utils import strip_html
 
 API_URL = "https://www.kalibrr.com/kjs/job_board/search"
 HEADERS = {
@@ -50,6 +51,10 @@ class KalibrrFetcher(BaseFetcher):
         company = i.get("company") or {}
         code = company.get("code", "")
         job_id = i.get("id", "")
+        # Kalibrr search sudah menyertakan deskripsi & kualifikasi lengkap (HTML).
+        desc = strip_html(i.get("description")) or strip_html(i.get("summary"))
+        quals = strip_html(i.get("qualifications"))
+        requirements = " ".join(x for x in [quals] if x)
         return Job(
             source="kalibrr",
             external_id=str(job_id),
@@ -57,7 +62,9 @@ class KalibrrFetcher(BaseFetcher):
             company=company.get("name", ""),
             location=i.get("location", ""),
             salary_min=i.get("base_salary"),
-            description=(i.get("summary") or "")[:500],
+            salary_max=i.get("maximum_salary"),
+            description=desc,
+            requirements=requirements,
             job_type=(i.get("employment_type") or {}).get("name", "")
             if isinstance(i.get("employment_type"), dict)
             else "",

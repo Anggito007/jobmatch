@@ -13,11 +13,10 @@ interface Props {
   m: Match;
   loggedIn: boolean;
   saved: boolean;
-  onFeedback: (jobId: string, relevant: boolean) => void;
   onSave: (jobId: string) => void;
 }
 
-export default function JobCard({ m, loggedIn, saved, onFeedback, onSave }: Props) {
+export default function JobCard({ m, loggedIn, saved, onSave }: Props) {
   const pct = Math.round(m.score * 100);
   const salary = fmtSalary(m);
   const meta = [m.source, m.location, m.job_type, m.work_arrangement].filter(Boolean);
@@ -57,21 +56,13 @@ export default function JobCard({ m, loggedIn, saved, onFeedback, onSave }: Prop
           Lihat &amp; Lamar →
         </a>
         {loggedIn && (
-          <>
-            <button
-              className={`btn ghost small${saved ? " saved" : ""}`}
-              onClick={() => onSave(m.id)}
-              title={saved ? "Tersimpan — klik untuk tandai sudah dilamar" : "Simpan lowongan"}
-            >
-              {saved ? "★ Tersimpan" : "☆ Simpan"}
-            </button>
-            <button className="btn ghost small" onClick={() => onFeedback(m.id, true)} title="Relevan">
-              👍
-            </button>
-            <button className="btn ghost small" onClick={() => onFeedback(m.id, false)} title="Tidak relevan">
-              👎
-            </button>
-          </>
+          <button
+            className={`btn ghost small${saved ? " saved" : ""}`}
+            onClick={() => onSave(m.id)}
+            title={saved ? "Tersimpan — klik untuk tandai sudah dilamar" : "Simpan lowongan"}
+          >
+            {saved ? "★ Tersimpan" : "☆ Simpan"}
+          </button>
         )}
       </div>
     </div>

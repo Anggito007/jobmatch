@@ -13,7 +13,6 @@ import {
   me,
   refreshJobs,
   saveJob,
-  sendFeedback,
   type MatchResponse,
   type SavedJob,
 } from "@/lib/api";
@@ -101,12 +100,7 @@ export default function Home() {
   }
 
   async function onFeedback(jobId: string, relevant: boolean) {
-    try {
-      await sendFeedback(jobId, relevant);
-      setNotice(relevant ? "Ditandai relevan 👍" : "Ditandai tidak relevan 👎");
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Feedback gagal.");
-    }
+    // Feedback dinonaktifkan — user mengumpulkan data label secara manual.
   }
 
   async function toggleSave(jobId: string) {
@@ -302,7 +296,6 @@ export default function Home() {
                   key={m.id}
                   loggedIn={!!email}
                   saved={savedSet.has(m.id)}
-                  onFeedback={onFeedback}
                   onSave={toggleSave}
                 />
               ))}
@@ -316,7 +309,7 @@ export default function Home() {
           <div className="empty">
             Unggah CV, lalu klik <strong>Cari Lowongan Cocok</strong>. Backend memindai
             ribuan lowongan dari 6 portal, menghitung kecocokan semantik, lalu
-            mengurutkannya. Masuk/daftar untuk menyimpan lowongan &amp; memberi feedback.
+            mengurutkannya. Masuk/daftar untuk menyimpan lowongan.
           </div>
         </section>
       )}

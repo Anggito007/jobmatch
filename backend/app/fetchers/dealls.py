@@ -59,16 +59,19 @@ class DeallsFetcher(BaseFetcher):
         city = d.get("city") or {}
         slug = d.get("slug", "")
         salary_range = d.get("salaryRange") or {}
+        # skills berupa list of dict {name: ...}.
+        skills = [s["name"] for s in (d.get("skills") or []) if isinstance(s, dict) and s.get("name")]
         return Job(
             source="dealls",
             external_id=str(d.get("id", "")),
             title=d.get("role", ""),
             company=company.get("name", ""),
             location=city.get("name", ""),
-            salary_min=salary_range.get("min"),
-            salary_max=salary_range.get("max"),
+            salary_min=salary_range.get("start"),
+            salary_max=salary_range.get("end"),
             job_type=", ".join(d.get("employmentTypes") or []),
             work_arrangement=d.get("workplaceType", ""),
+            skills=skills,
             url=f"https://dealls.com/role/{slug}",
             posted_at=d.get("publishedAt", ""),
         )

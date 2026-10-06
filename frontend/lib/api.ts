@@ -151,15 +151,6 @@ export function logout() {
   setToken(null);
 }
 
-// --- Feedback ---
-export async function sendFeedback(jobId: string, isRelevant: boolean): Promise<{ action: string }> {
-  return apiJson("/api/feedback", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_id: jobId, is_relevant: isRelevant }),
-  });
-}
-
 // --- Saved jobs ---
 export async function saveJob(jobId: string, status: string): Promise<{ action: string }> {
   return apiJson("/api/saved", {
