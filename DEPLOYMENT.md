@@ -1,111 +1,141 @@
-# Deployment JobMatch — Langkah Konkret
+# Deployment JobMatch — Oracle Cloud Always Free + Vercel
 
-## Ringkasan arsitektur final
+Arsitektur final (gratis Rp0):
 
 ```
 Frontend (Next.js)   →  Vercel (gratis)
-Backend (FastAPI)    →  HF Spaces / VPS / Render  (BUKAN Vercel — torch+model ~1GB)
-DB (Postgres)        →  Neon / Supabase (gratis)  [opsional, SQLite cukup untuk demo]
+Backend (FastAPI)    →  Oracle Cloud Always Free VM (gratis selamanya, 24GB RAM)
+                        + DuckDNS subdomain gratis + Caddy (HTTPS otomatis)
+DB                   →  SQLite (di disk VM, persistent)
 ```
 
-**Kenapa backend tidak di Vercel:** backend butuh proses yang selalu jalan
-(scheduler), model ML ~470MB, dan torch ~500MB — total ~1GB. Vercel serverless
-punya durasi & ukuran terbatas, tidak bisa menjalankan ini.
+> **Kenapa perlu HTTPS di backend:** halaman Vercel itu HTTPS. Browser akan
+> **memblokir** request dari halaman HTTPS ke `http://IP:8000` (mixed content).
+> Makanya backend harus diberi HTTPS lewat DuckDNS + Caddy (script sudah disiapkan).
 
 ---
 
-## Langkah 1 — Push kode ke GitHub
+## Bagian 1 — Daftar Oracle Cloud (sekali, butuh kartu untuk verifikasi)
 
-### 1a. Siapkan token (sekali)
-1. Buka https://github.com/settings/tokens → **Generate new token (classic)**
-2. Nama: `hermes-agent` · Expiration: 90 hari
-3. Centang scope **`repo`** (dan `workflow` kalau mau CI)
-4. **Copy token** (tidak akan ditampilkan lagi)
+1. Buka https://www.oracle.com/cloud/free/ → **Start for free**
+2. Isi data (negara, nama, email). Saat diminta **kartu debit/kredit**:
+   - Ini hanya **verifikasi identitas** (hold ~$1 lalu dikembalikan). Selama
+     kamu cuma pakai resource Always Free, **tidak akan pernah ditagih**.
+3. Verifikasi email + akun siap. Proses bisa 5–15 menit.
 
-### 1b. Buat repo + push
-Di terminal (folder `C:\Hermes\jobseeker-automation`):
+---
+
+## Bagian 2 — Buat VM (Ampere A1, 4 core / 24GB RAM — always free)
+
+1. Masuk console: https://cloud.oracle.com → pilih region (mis. **Singapore**,
+   sering masih ada stok A1; kalau penuh coba region lain).
+2. Menu kiri → **Compute → Instances** → **Create instance**
+3. Isi:
+   - **Name**: `jobmatch`
+   - **Image**: klik *Change image* → **Canonical Ubuntu 22.04** (atau 24.04)
+   - **Shape**: klik *Change shape* → tab **Specialty and legacy** → pilih
+     **Ampere → VM.Standard.A1.Flex** → set **OCPU = 4, Memory = 24 GB**
+     (ini batas always-free). Kalau A1 habis, fallback: *AMD → VM.Standard.E2.1.Micro*
+     (1GB RAM — cukup untuk backend, tapi lebih lambat).
+4. **Networking**: biarkan *Create new VCN* default. Centang **Assign public IPv4 address**.
+5. **SSH key**: pilih *Paste public keys* → tempel ini (sudah saya generate):
+
+   ```
+   ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMz2Ykljkh8Rxg1wiN5sQqPs3l7LGzz8EDNpbfqP10oR anggito-jobmatch
+   ```
+
+6. **Create**. Tunggu instance **Running** → catat **Public IP Address**.
+
+---
+
+## Bagian 3 — Buka port 80 & 443 (HTTPS) di firewall VCN
+
+1. Di halaman instance, klik nama **Virtual cloud network** (VCN) → **Subnets** →
+   klik subnet default.
+2. Klik **Security Lists** → **Default Security List** → **Add Ingress Rules**:
+   - Source: `0.0.0.0/0`, Protocol: **TCP**, Destination port: **80** → Add
+   - Source: `0.0.0.0/0`, Protocol: **TCP**, Destination port: **443** → Add
+3. (Opsional, untuk tes tanpa HTTPS) tambah juga port **8000**.
+
+---
+
+## Bagian 4 — SSH masuk & jalankan setup (sekali)
+
+Di terminal Windows (git-bash), ganti `<IP_VM>` dengan IP dari Bagian 2:
 
 ```bash
-git config user.name "NamaKamu"
-git config user.email "email@kamu.com"
-
-# Buat repo kosong dulu di github.com (jangan centang "Add README")
-# atau lewat CLI kalau gh sudah terinstall:
-# gh repo create jobmatch --public --source . --push
-
-git remote add origin https://github.com/USERNAME/jobmatch.git
-git push -u origin main
+ssh -i ~/.ssh/jobmatch_oracle ubuntu@<IP_VM>
 ```
 
-Saat diminta password: isi **token** (bukan password GitHub).
+Setelah masuk, jalankan:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Anggito007/jobmatch/main/scripts/deploy_oracle.sh)"
+```
+
+Ini otomatis: install Python → clone repo → venv + dependensi → unduh model
+(~470MB) → pasang service yang **selalu jalan** (systemd). Tunggu 5–10 menit.
+
+Verifikasi:
+
+```bash
+sudo systemctl status jobmatch
+curl http://localhost:8000/health
+```
 
 ---
 
-## Langkah 2 — Deploy frontend ke Vercel
+## Bagian 5 — Pasang HTTPS (DuckDNS + Caddy)
 
-### Cara termudah (GUI, tanpa CLI):
+**5a. Buat subdomain gratis di https://www.duckdns.org** (login pakai akun
+GitHub/Google), buat domain mis. `anggito-jobmatch`, catat **token**-nya.
 
-1. Buka https://vercel.com → **Login** (pakai akun GitHub biar sekalian nyambung)
-2. Klik **Add New → Project** → **Import** repo `jobmatch`
-3. **PENTING**: di **Root Directory**, ketik `frontend` (karena repo punya `backend/` juga)
-4. Framework otomatis terdeteksi **Next.js** — biarkan default
-5. **Environment Variables** → tambahkan:
-   - `NEXT_PUBLIC_API_URL` = `https://<URL-BACKEND-KAMU>` (dari Langkah 3)
-6. Klik **Deploy**
+**5b. Di VM** (masih dalam sesi SSH):
 
-Selesai deploy, frontend live di `https://jobmatch-xxx.vercel.app`.
+```bash
+cd ~/jobmatch
+DOMAIN=anggito-jobmatch.duckdns.org DUCKDNS_TOKEN=TOKEN-KAMU bash scripts/deploy_https.sh
+```
 
-> ⚠️ Tanpa `NEXT_PUBLIC_API_URL` yang benar, tombol "Cari Lowongan" akan gagal
-> (karena default-nya `http://localhost:8000`).
+Caddy akan otomatis dapat sertifikat HTTPS (Let's Encrypt). Verifikasi:
 
----
+```bash
+curl https://anggito-jobmatch.duckdns.org/health
+```
 
-## Langkah 3 — Deploy backend (pilih satu)
-
-### Opsi A — Hugging Face Spaces (gratis, paling pas untuk ML, ~0 biaya)
-
-1. Buka https://huggingface.co/spaces → **Create new Space**
-2. Pilih **Docker** SDK, Public
-3. Upload isi folder `backend/` (atau hubungkan ke repo GitHub)
-4. HF Spaces free tier: 2 vCPU, 16GB RAM, 50GB disk → backend muat nyaman
-5. Setelah jalan, URL backend = `https://<user>-jobmatch.hf.space`
-6. Isi `NEXT_PUBLIC_API_URL` di Vercel dengan URL itu, lalu re-deploy
-
-Catatan: HF Spaces punya *cold start* (bangun ~1-2 menit saat pertama diakses
-setelah idle). Untuk portofolio/demo tidak masalah.
-
-### Opsi B — VPS murah (paling stabil, ~Rp50-100rb/bln)
-
-1. Sewa VPS (Contabo/IDCloudHost/DigitalOcean droplet termurah)
-2. Install Docker, jalankan `backend/Dockerfile`
-3. Pasang HTTPS (Caddy/nginx + Let's Encrypt)
-4. URL backend = domain/subdomain VPS kamu
-
-### Opsi C — Render free tier (perlu mengecilkan backend dulu)
-
-Render free = 512MB disk, backend ~1GB tidak muat. Supaya muat:
-- Ganti `sentence-transformers` → `fastembed` (ONNX, runtime lebih kecil), ATAU
-- Pakai embedding API ([OI] `text-embedding-3-small` / Gemini), backend jadi <200MB.
-
-Setelah dikecilkan, deploy pakai `backend/render.yaml` (blueprint), set
-`CORS_ORIGINS` = URL Vercel, `DATABASE_URL` = Postgres Neon.
+Backend kamu sekarang live di `https://anggito-jobmatch.duckdns.org`.
 
 ---
 
-## Langkah 4 — Set env var di Vercel (rekap)
+## Bagian 6 — Deploy frontend ke Vercel
 
-| Var | Nilai |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | URL backend publik (HF Spaces / VPS / Render) |
-
-Dan di backend, pastikan CORS mengizinkan origin Vercel:
-`CORS_ORIGINS=https://jobmatch-xxx.vercel.app` (di `.env` backend / env host).
+1. Buka https://vercel.com → **Login pakai GitHub** (akun Anggito007)
+2. **Add New → Project** → **Import** repo `Anggito007/jobmatch`
+3. **Root Directory**: ketik `frontend`
+4. Framework terdeteksi **Next.js** — biarkan default
+5. **Environment Variables** → tambah:
+   - `NEXT_PUBLIC_API_URL` = `https://anggito-jobmatch.duckdns.org`
+6. **Deploy** → frontend live di `https://jobmatch-xxx.vercel.app`
 
 ---
 
 ## Checklist selesai
 
-- [ ] Kode ter-push ke GitHub (repo publik untuk portofolio)
-- [ ] Frontend live di Vercel, root dir `frontend`, env `NEXT_PUBLIC_API_URL` terisi
-- [ ] Backend live (HF Spaces / VPS), CORS di-allow
-- [ ] Uji: buka URL Vercel dari HP orang lain → upload CV → hasil muncul
+- [ ] Oracle Cloud terdaftar + VM A1 jalan (punya Public IP)
+- [ ] Port 80 & 443 dibuka di VCN
+- [ ] `deploy_oracle.sh` sukses (`/health` balas OK di dalam VM)
+- [ ] HTTPS jalan (DuckDNS + Caddy, `curl https://DOMAIN/health` OK dari laptop)
+- [ ] Vercel deploy frontend, root dir `frontend`, env `NEXT_PUBLIC_API_URL` terisi
+- [ ] Uji: buka URL Vercel dari HP → upload CV → hasil muncul
+
+---
+
+## Troubleshooting
+
+| Masalah | Solusi |
+|---|---|
+| "Out of capacity" saat bikin A1 | Ganti region (Singapore/Osaka/Mumbai sering ada). Atau coba lagi jam berbeda — kapasitas A1 fluktuatif. |
+| `ssh` connection refused | Port 22 harusnya terbuka default. Pastikan IP benar, instance Running. |
+| Caddy gagal dapat sertifikat | Pastikan port 80 & 443 terbuka di VCN, dan domain DuckDNS sudah menunjuk ke IP VM. |
+| Vercel tidak bisa fetch backend | Cek `NEXT_PUBLIC_API_URL` benar + backend `curl https://DOMAIN/health` OK. CORS sudah `*`. |
+| Backend lambat pertama kali | Normal — model ~470MB dimuat ke RAM saat start. Setelah itu cepat. |
