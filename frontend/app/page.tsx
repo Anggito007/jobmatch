@@ -4,24 +4,30 @@ import { useEffect, useState } from "react";
 import CvUpload from "@/components/CvUpload";
 import JobCard from "@/components/JobCard";
 import AuthForm from "@/components/AuthForm";
+import FilterBar from "@/components/FilterBar";
 import {
   deleteSaved,
   getToken,
+  getPreferences,
   listSaved,
   logout,
   matchCv,
   me,
   refreshJobs,
   saveJob,
+  savePreferences,
   type MatchResponse,
   type SavedJob,
 } from "@/lib/api";
+import { EMPTY_FILTERS, type JobFilters } from "@/lib/filters";
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [keywords, setKeywords] = useState("");
   const [location, setLocation] = useState("");
   const [preference, setPreference] = useState("");
+  const [filters, setFilters] = useState<JobFilters>(EMPTY_FILTERS);
+  const [applying, setApplying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [result, setResult] = useState<MatchResponse | null>(null);
@@ -38,7 +44,10 @@ export default function Home() {
   useEffect(() => {
     if (getToken()) {
       me()
-        .then((u) => setEmail(u.email))
+        .then((u) => {
+          setEmail(u.email);
+          loadPrefs();
+        })
         .catch(() => logout());
     }
   }, []);
@@ -46,6 +55,15 @@ export default function Home() {
   useEffect(() => {
     if (email) loadSaved();
   }, [email]);
+
+  async function loadPrefs() {
+    try {
+      const { preferences } = await getPreferences();
+      setFilters(preferences);
+    } catch {
+      // abaikan (belum ada preferensi tersimpan)
+    }
+  }
 
   async function loadSaved() {
     try {
@@ -60,6 +78,7 @@ export default function Home() {
   function onAuth(e: string) {
     setEmail(e);
     setNotice(`Selamat datang, ${e}`);
+    loadPrefs();
   }
 
   function onLogout() {
@@ -78,13 +97,38 @@ export default function Home() {
     setError(null);
     setResult(null);
     try {
-      const res = await matchCv(file, keywords, location, preference, 30);
+      const res = await matchCv(file, keywords, location, preference, 30, filters);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function applyFilters() {
+    // Simpan preferensi (bila login), lalu jalankan ulang matching dengan filter.
+    setApplying(true);
+    try {
+      if (getToken()) {
+        await savePreferences(filters);
+        setNotice("Preferensi tersimpan.");
+      }
+      if (file) {
+        await runMatch();
+      } else {
+        setNotice("Preferensi diterapkan — unggah CV untuk mulai mencari.");
+      }
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Gagal menerapkan filter.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  function clearFilters() {
+    setFilters(EMPTY_FILTERS);
+    setNotice("Filter direset.");
   }
 
   async function runRefresh() {
@@ -216,6 +260,17 @@ export default function Home() {
         {notice && <div className="note">{notice}</div>}
       </section>
 
+      <section className="panel">
+        <h2>2. Preferensi &amp; Filter</h2>
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          onApply={applyFilters}
+          onClear={clearFilters}
+          applying={applying}
+        />
+      </section>
+
       {error && (
         <section className="panel">
           <div className="error">⚠️ {error}</div>
@@ -258,11 +313,15 @@ export default function Home() {
 
       {result && (
         <section className="panel">
-          <h2>2. Hasil ({result.count} lowongan cocok)</h2>
+          <h2>3. Hasil ({result.count} lowongan cocok)</h2>
           <div className="result-meta">
             <span className="count">
               {result.count} lowongan paling cocok dari {result.pool_size} lowongan yang
-              dipindai (6 sumber).
+              dipindai (6 sumber)
+              {result.filtered_out > 0 && (
+                <> — <b style={{ color: "var(--amber)" }}>{result.filtered_out}</b> disaring oleh filter</>
+              )}
+              .
             </span>
           </div>
           {result.profile && (

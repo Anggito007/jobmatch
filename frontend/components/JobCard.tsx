@@ -51,6 +51,14 @@ export default function JobCard({ m, loggedIn, saved, onSave }: Props) {
         </div>
       )}
 
+      {m.reasons && m.reasons.length > 0 && (
+        <ul className="reasons">
+          {m.reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+
       <div className="actions">
         <a href={m.url} target="_blank" rel="noreferrer">
           Lihat &amp; Lamar →

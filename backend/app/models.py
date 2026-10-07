@@ -95,6 +95,37 @@ class SavedJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class UserPreferences(Base):
+    """Preferensi/filter pencarian lowongan per user (persisten)."""
+
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+
+    locations: Mapped[list] = mapped_column(JSON, default=list)
+    position_levels: Mapped[list] = mapped_column(JSON, default=list)
+    job_types: Mapped[list] = mapped_column(JSON, default=list)
+    specializations: Mapped[list] = mapped_column(JSON, default=list)
+    education_levels: Mapped[list] = mapped_column(JSON, default=list)
+    preferred_companies: Mapped[list] = mapped_column(JSON, default=list)
+    excluded_companies: Mapped[list] = mapped_column(JSON, default=list)
+
+    min_salary: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_salary: Mapped[float | None] = mapped_column(Float, nullable=True)
+    salary_currency: Mapped[str] = mapped_column(String(8), default="")
+    salary_not_specified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    remote: Mapped[bool] = mapped_column(Boolean, default=False)
+    hybrid: Mapped[bool] = mapped_column(Boolean, default=False)
+    work_abroad: Mapped[bool] = mapped_column(Boolean, default=False)
+    fresh_graduate: Mapped[bool] = mapped_column(Boolean, default=False)
+    quick_response: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    sort_by: Mapped[str] = mapped_column(String(32), default="relevance")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class CVProfile(Base):
     """CV pengguna (untuk MVP: 1 CV aktif per user, yang terbaru menang)."""
 

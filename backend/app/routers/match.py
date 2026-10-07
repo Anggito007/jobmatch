@@ -23,6 +23,7 @@ from app.matching.embedder import get_embedder
 from app.matching.scorer import blend_vectors, job_skills, job_text, score_match
 from app.matching.skills import extract_skills
 from app.models import User
+from app.preferences import from_dict, passes_hard_filters, preference_boost, sort_results
 from app.scheduler import collect_jobs
 from app.store import get_jobs, save_cv
 
@@ -90,9 +91,15 @@ def _pref_boost(job, jtext: str, jskills: list[str], pref_tokens: list[str]) -> 
 
 
 def score_rows(rows: list, target_vec: list[float], target_skills: list[str],
-               target_text: str, embedder, pref_tokens: list[str] | None = None) -> list[dict]:
-    """Skor semua baris lowongan terhadap target; kembalikan terurut skor menurun."""
+               target_text: str, embedder, pref_tokens: list[str] | None = None,
+               filters=None) -> list[dict]:
+    """Skor semua baris lowongan terhadap target + boost preferensi + alasan.
+
+    Kembalikan list (TIDAK diurutkan) — pengurutan diserahkan ke pemanggil
+    (relevance / latest / salary / match_score via `sort_results`).
+    """
     pref_tokens = pref_tokens or []
+    filters = filters or from_dict(None)
     results: list[dict] = []
     for row in rows:
         jtext = job_text(row)
@@ -106,6 +113,12 @@ def score_rows(rows: list, target_vec: list[float], target_skills: list[str],
         )
         # Boost leksikal preferensi (tegas, bukan sekadar geser vektor).
         score = min(1.0, score + _pref_boost(row, jtext, jskills, pref_tokens))
+
+        # Boost + alasan dari preferensi/filter lanjutan.
+        pboost, preasons = preference_boost(row, filters)
+        reasons: list[str] = preasons
+        score = min(1.0, score + pboost)
+
         results.append(
             {
                 "id": f"{row.source}:{row.external_id}",
@@ -123,9 +136,9 @@ def score_rows(rows: list, target_vec: list[float], target_skills: list[str],
                 "posted_at": row.posted_at,
                 "score": round(score, 4),
                 "matched_skills": matched,
+                "reasons": reasons,
             }
         )
-    results.sort(key=lambda r: r["score"], reverse=True)
     return results
 
 
@@ -136,11 +149,19 @@ def match_cv(
     location: str = Form(""),
     preference: str = Form(""),     # posisi/bidang yang diincar (mengemudikan matching)
     preference_weight: float = Form(0.65),  # 0..1, seberapa kuat preferensi vs CV
+    filters: str = Form(""),        # JSON string preferensi/filter lanjutan
     source: str | None = Form(None),
     top_n: int = Form(30),
     user: User | None = Depends(get_optional_user),
 ) -> dict:
     preference_weight = max(0.0, min(1.0, preference_weight))
+
+    # Parse filter lanjutan (JSON) → toleran terhadap payload kosong/rusak.
+    import json
+    try:
+        filt = from_dict(json.loads(filters) if filters else None)
+    except (json.JSONDecodeError, ValueError):
+        filt = from_dict(None)
 
     # 1. Ekstrak CV → profil.
     content = file.file.read()
@@ -177,11 +198,20 @@ def match_cv(
         if source:
             rows = [r for r in rows if r.source == source]
 
-    # 4. Skor semua lowongan terhadap target (termasuk boost preferensi).
-    results = score_rows(rows, target_vec, target_skills, target_text, embedder, pref_tokens)
+    # 3b. Terapkan HARD FILTER (lokasi/tipe/gaji/pendidikan/perusahaan/remote).
+    before_filter = len(rows)
+    rows = [r for r in rows if passes_hard_filters(r, filt)]
+    filtered_out = before_filter - len(rows)
 
-    # 5. Diversifikasi + potong top_n.
-    results = _diversify(results, top_n)
+    # 4. Skor semua lowongan terhadap target (termasuk boost preferensi).
+    results = score_rows(rows, target_vec, target_skills, target_text, embedder, pref_tokens, filt)
+
+    # 5. Urutkan sesuai preferensi; diversifikasi hanya untuk "relevance".
+    results = sort_results(results, filt.sort_by)
+    if filt.sort_by in ("", "relevance"):
+        results = _diversify(results, top_n)
+    else:
+        results = results[:top_n]
 
     resp = profile.to_dict()
     resp["preference"] = preference.strip()
@@ -191,7 +221,15 @@ def match_cv(
         "profile": resp,
         "count": len(results),
         "pool_size": len(rows),
+        "filtered_out": filtered_out,
         "keywords": keywords,
+        "filters_applied": {
+            "sort_by": filt.sort_by,
+            "hard_filters": [k for k in (
+                "locations", "job_types", "min_salary", "max_salary",
+                "education_levels", "excluded_companies", "remote", "hybrid",
+            ) if getattr(filt, k)],
+        },
         "matches": results,
     }
 

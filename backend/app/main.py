@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_db
-from app.routers import auth, cv, email, jobs, match, saved
+from app.routers import auth, cv, email, jobs, match, preferences, saved
 from app.scheduler import start_scheduler, stop_scheduler
 
 
@@ -53,6 +53,7 @@ app.include_router(match.router, prefix="/api/match", tags=["match"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(saved.router, prefix="/api/saved", tags=["saved"])
 app.include_router(email.router, prefix="/api/digest", tags=["email"])
+app.include_router(preferences.router, prefix="/api/preferences", tags=["preferences"])
 
 
 @app.get("/health", tags=["meta"])

@@ -6,7 +6,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db import SessionLocal
 from app.fetchers.base import Job as JobData
-from app.models import CVProfile, Feedback, Job, SavedJob, User
+from app.models import CVProfile, Feedback, Job, SavedJob, User, UserPreferences
 
 # Kolom yang di-update saat terjadi konflik (source+external_id sudah ada).
 _UPSERT_UPDATE_COLS = [
@@ -213,3 +213,28 @@ def delete_saved(user_id: int, source: str, ext_id: str) -> bool:
             db.commit()
             return True
         return False
+
+
+# --- Preferensi / filter pencarian ---
+
+def save_preferences(user_id: int | None, data: dict) -> UserPreferences:
+    """Upsert preferensi user (satu baris per user; yang terbaru menang)."""
+    with SessionLocal() as db:
+        row = db.scalar(select(UserPreferences).where(UserPreferences.user_id == user_id))
+        if row:
+            for k, v in data.items():
+                if hasattr(row, k):
+                    setattr(row, k, v)
+            db.commit()
+            db.refresh(row)
+            return row
+        p = UserPreferences(user_id=user_id, **{k: v for k, v in data.items() if hasattr(UserPreferences, k)})
+        db.add(p)
+        db.commit()
+        db.refresh(p)
+        return p
+
+
+def get_preferences(user_id: int | None) -> UserPreferences | None:
+    with SessionLocal() as db:
+        return db.scalar(select(UserPreferences).where(UserPreferences.user_id == user_id))

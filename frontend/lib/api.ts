@@ -1,6 +1,8 @@
 // Klien API untuk backend JobMatch (FastAPI).
 // URL backend diambil dari NEXT_PUBLIC_API_URL (default: localhost:8000).
 
+import type { JobFilters } from "./filters";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "jobmatch_token";
 
@@ -49,6 +51,7 @@ export interface Match {
   posted_at: string;
   score: number;
   matched_skills: string[];
+  reasons: string[];
 }
 
 export interface CVProfile {
@@ -65,7 +68,9 @@ export interface MatchResponse {
   profile: CVProfile;
   count: number;
   pool_size: number;
+  filtered_out: number;
   keywords: string;
+  filters_applied: { sort_by: string; hard_filters: string[] };
   matches: Match[];
 }
 
@@ -122,6 +127,7 @@ export async function matchCv(
   location: string,
   preference: string,
   topN: number,
+  filters?: JobFilters,
 ): Promise<MatchResponse> {
   const form = new FormData();
   form.append("file", file);
@@ -129,7 +135,25 @@ export async function matchCv(
   form.append("location", location);
   form.append("preference", preference);
   form.append("top_n", String(topN));
+  if (filters) {
+    form.append("filters", JSON.stringify(filters));
+  }
   return apiJson<MatchResponse>("/api/match", { method: "POST", body: form });
+}
+
+// --- Preferensi / filter (persisten per user) ---
+export async function getPreferences(): Promise<{ preferences: JobFilters }> {
+  return apiJson("/api/preferences");
+}
+
+export async function savePreferences(
+  filters: JobFilters,
+): Promise<{ preferences: JobFilters; saved: boolean }> {
+  return apiJson("/api/preferences", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(filters),
+  });
 }
 
 export async function refreshJobs(): Promise<{ fetched: number; added: number; updated: number }> {
