@@ -2,13 +2,24 @@
 
 Menggunakan APScheduler (BackgroundScheduler). `collect_jobs()` bisa dipanggil
 manual (mis. endpoint `/api/jobs/refresh`) atau terjadwal.
+
+Dua mode pengumpulan:
+- **broad** (keywords kosong) — feed terbaru tiap sumber, untuk mengisi pool.
+- **targeted** (keywords diisi) — pencarian kata kunci nyata di tiap portal.
+  Inilah yang membuat hasil banyak: portal mencari SELURUH indeksnya
+  (JobStreet melaporkan 1.669 hasil untuk "video editor"), bukan hanya
+  snapshot pool kita yang ~2.000 lowongan.
+
+Fetch dijalankan PARALEL antar sumber (dulu berurutan → lambat).
 """
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.fetchers.base import BaseFetcher, Job
 from app.fetchers.dealls import DeallsFetcher
 from app.fetchers.glints import GlintsFetcher
 from app.fetchers.jobstreet import JobStreetFetcher
@@ -21,7 +32,7 @@ from app.store import upsert_jobs
 
 log = logging.getLogger("jobmatch.scheduler")
 
-FETCHERS = {
+FETCHERS: dict[str, BaseFetcher] = {
     "jobstreet": JobStreetFetcher(),
     "glints": GlintsFetcher(),
     "dealls": DeallsFetcher(),
@@ -30,45 +41,107 @@ FETCHERS = {
     "techinasia": TechInAsiaFetcher(),
 }
 
+# Batas lowongan per sumber saat fetch. Tanpa ini Kalibrr (yang selalu
+# mengembalikan ~1.400 lowongan) mendominasi pool sampai >60% dan hasil
+# pencarian jadi berat sebelah ke satu situs.
+PER_SOURCE_CAP = 400
+
 _scheduler: BackgroundScheduler | None = None
 
 
-def collect_jobs(keywords: list[str] | None = None, location: str = "") -> dict:
-    """Fetch dari semua sumber, embed, simpan (dedupe).
+def fetch_all(
+    keywords: list[str] | None = None,
+    location: str = "",
+    per_source_cap: int = PER_SOURCE_CAP,
+    max_workers: int = 6,
+) -> tuple[list[Job], list[str]]:
+    """Fetch dari semua sumber PARALEL. Return (jobs, sumber_yang_gagal).
 
-    Default: fetch BROAD (keyword kosong → latest dari tiap sumber), supaya
-    pool lowongan beragam dan semantic matching (bukan keyword) yang memilih
-    mana yang cocok dengan CV.
+    Gagal di satu sumber tidak menghentikan sumber lain (mis. Glints yang
+    kadang balas 403 karena rate-limit).
     """
-    keywords = keywords or []  # list kosong = broad fetch
-    total_added = 0
-    total_updated = 0
-    fetched = 0
+    keywords = keywords or []
+    all_jobs: list[Job] = []
+    failed: list[str] = []
 
-    embedder = get_embedder()
-
-    for name, fetcher in FETCHERS.items():
+    def _one(name: str, fetcher: BaseFetcher) -> tuple[str, list[Job]]:
         try:
             jobs = fetcher.fetch(keywords, location=location)
-        except Exception as e:  # satu sumber gagal tidak menghentikan lainnya
+            if per_source_cap and len(jobs) > per_source_cap:
+                jobs = jobs[:per_source_cap]
+            return name, jobs
+        except Exception as e:  # noqa: BLE001 — satu sumber gagal, lanjut
             log.warning("fetch %s gagal: %s", name, e)
-            continue
+            return name, []
 
-        texts = [job_text(j) for j in jobs]
-        vecs = embedder.encode(texts) if texts else []
-        # Sertakan skill hasil ekstraksi di objek job sebelum disimpan.
-        for job, text in zip(jobs, texts):
-            job.skills = job_skills(job)
-        stats = upsert_jobs(jobs, vecs)
-        fetched += len(jobs)
-        total_added += stats["added"]
-        total_updated += stats["updated"]
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_one, n, f): n for n, f in FETCHERS.items()}
+        for fut in as_completed(futures):
+            name, jobs = fut.result()
+            if not jobs:
+                failed.append(name)
+            all_jobs.extend(jobs)
+
+    return all_jobs, failed
+
+
+def _store(jobs: list[Job]) -> dict:
+    """Embed + upsert daftar job. Return statistik."""
+    if not jobs:
+        return {"added": 0, "updated": 0}
+    embedder = get_embedder()
+    texts = [job_text(j) for j in jobs]
+    vecs = embedder.encode(texts) if texts else []
+    for job, text in zip(jobs, texts):
+        job.skills = job_skills(job)
+    stats = upsert_jobs(jobs, vecs)
+    return {"added": stats["added"], "updated": stats["updated"]}
+
+
+def collect_jobs(
+    keywords: list[str] | None = None,
+    location: str = "",
+    per_source_cap: int = PER_SOURCE_CAP,
+) -> dict:
+    """Fetch dari semua sumber (paralel), embed, simpan (dedupe).
+
+    `keywords` kosong = broad fetch (feed terbaru tiap sumber).
+    """
+    keywords = keywords or []
+    jobs, failed = fetch_all(keywords, location=location, per_source_cap=per_source_cap)
+    stats = _store(jobs)
+    return {
+        "fetched": len(jobs),
+        "added": stats["added"],
+        "updated": stats["updated"],
+        "sources": list(FETCHERS),
+        "failed_sources": failed,
+    }
+
+
+def collect_jobs_live(
+    keywords: list[str],
+    location: str = "",
+    per_source_cap: int = PER_SOURCE_CAP,
+) -> dict:
+    """Fetch TERARAH dengan kata kunci user, lalu simpan.
+
+    Dipakai sebelum matching supaya hasil mengikuti isi indeks portal
+    (bukan hanya pool yang tersimpan). Return statistik + jumlah per sumber.
+    """
+    jobs, failed = fetch_all(keywords, location=location, per_source_cap=per_source_cap)
+    stats = _store(jobs)
+
+    per_source: dict[str, int] = {}
+    for j in jobs:
+        per_source[j.source] = per_source.get(j.source, 0) + 1
 
     return {
-        "fetched": fetched,
-        "added": total_added,
-        "updated": total_updated,
-        "sources": list(FETCHERS),
+        "fetched": len(jobs),
+        "added": stats["added"],
+        "updated": stats["updated"],
+        "per_source": per_source,
+        "failed_sources": failed,
     }
 
 

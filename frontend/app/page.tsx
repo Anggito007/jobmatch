@@ -324,6 +324,35 @@ export default function Home() {
               .
             </span>
           </div>
+
+          {result.live && !("error" in result.live) && result.live.fetched > 0 && (
+            <div className="result-meta">
+              <span className="count">
+                🔎 Pencarian langsung ke portal: <b>{result.live.fetched}</b> lowongan ditarik
+                ({result.live.added} baru)
+              </span>
+              <div className="chips">
+                {Object.entries(result.live.per_source || {}).map(([s, n]) => (
+                  <span className="chip" key={s}>
+                    {s}: {n}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {result.results_by_source && Object.keys(result.results_by_source).length > 0 && (
+            <div className="result-meta">
+              <span className="count">Sebaran hasil per sumber:</span>
+              <div className="chips">
+                {Object.entries(result.results_by_source).map(([s, n]) => (
+                  <span className="chip" key={s}>
+                    {s}: {n}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {result.profile && (
             <div className="result-meta profile-line">
               <span className="count">Profil CV:</span>

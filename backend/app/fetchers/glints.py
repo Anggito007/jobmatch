@@ -7,14 +7,20 @@ kita fetch detail tiap job secara paralel untuk ambil description + skills.
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 
 import httpx
 
 from .base import BaseFetcher, Job
 from .utils import fetch_many, strip_html
 
+log = logging.getLogger("jobmatch.fetchers.glints")
+
 API_URL = "https://glints.com/api/v2-alc/graphql"
+MAX_RETRIES = 3
+RETRY_BACKOFF = 1.5  # detik, dikali percobaan ke-N
 
 SEARCH_QUERY = """
 query searchJobsV3($data: JobSearchConditionInput!) {
@@ -22,11 +28,19 @@ query searchJobsV3($data: JobSearchConditionInput!) {
     jobsInPage {
       id
       title
+      createdAt
+      isRemote
+      workArrangementOption
+      type
+      educationLevel
+      minYearsOfExperience
+      maxYearsOfExperience
+      isActivelyHiring
       company { name }
       city { name }
       country { name }
       salaries { salaryType salaryMode minAmount maxAmount CurrencyCode }
-      createdAt
+      skills { mustHave skill { id name } }
     }
     hasMore
   }
@@ -39,6 +53,11 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
     ),
     "Content-Type": "application/json",
+    # WAJIB: tanpa Accept + Accept-Language, firewall Glints membalas 403
+    # untuk operasi searchJobsV3 (koneksi dasar tetap 200 — makanya sulit
+    # dideteksi). Ini penyebab pool Glints sempat tinggal 4 lowongan.
+    "Accept": "*/*",
+    "Accept-Language": "id-ID,id;q=0.9,en;q=0.8",
     "Origin": "https://glints.com",
     "Referer": "https://glints.com/id/opportunities/jobs/explore",
 }
@@ -58,9 +77,9 @@ class GlintsFetcher(BaseFetcher):
         keywords: list[str],
         location: str = "",
         country: str = "ID",
-        page_size: int = 30,
-        max_pages: int = 3,
-        enrich: bool = True,
+        page_size: int = 50,
+        max_pages: int = 1,
+        enrich: bool = False,
     ) -> list[Job]:
         jobs: list[Job] = []
         term = " ".join(keywords)
@@ -80,9 +99,9 @@ class GlintsFetcher(BaseFetcher):
                     },
                     "query": SEARCH_QUERY,
                 }
-                resp = client.post(API_URL, json=body)
-                resp.raise_for_status()
-                payload = resp.json()
+                payload = self._post_with_retry(client, body)
+                if payload is None:
+                    break
                 result = (payload.get("data") or {}).get("searchJobsV3") or {}
                 items = result.get("jobsInPage") or []
                 if not items:
@@ -96,10 +115,55 @@ class GlintsFetcher(BaseFetcher):
             self._enrich_details(jobs)
         return jobs
 
-    def _enrich_details(self, jobs: list[Job], max_workers: int = 6) -> None:
-        """Fetch halaman detail tiap job → ambil description + skills dari JSON-LD."""
+    @staticmethod
+    def _post_with_retry(client: httpx.Client, body: dict) -> dict | None:
+        """POST GraphQL; None bila halaman ini tidak bisa diambil.
+
+        Penting: Glints hanya mengizinkan **halaman 1** tanpa login. Halaman
+        berikutnya dibalas `403 {"message": "please login for more
+        information"}`. Dulu exception-nya membatalkan SELURUH fetch — termasuk
+        50 lowongan dari halaman 1 yang sudah berhasil diambil — sehingga pool
+        Glints tinggal 4 lowongan basi. Sekarang kegagalan halaman lanjutan
+        cukup menghentikan paginasi (return None), bukan menggagalkan semuanya.
+        """
+        last_status = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = client.post(API_URL, json=body)
+            except httpx.HTTPError:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+                continue
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except ValueError:
+                    return None
+            last_status = resp.status_code
+            # 403 "please login" = batas keras, tidak ada gunanya retry.
+            if resp.status_code == 403 and "please login" in resp.text.lower():
+                return None
+            if resp.status_code in (403, 429) or resp.status_code >= 500:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+                continue
+            return None
+        log.warning("Glints: halaman dilewati setelah %s percobaan (HTTP %s)", MAX_RETRIES, last_status)
+        return None
+
+    def _enrich_details(self, jobs: list[Job], max_workers: int = 3, max_enrich: int = 25) -> None:
+        """Fetch halaman detail tiap job → ambil description + skills dari JSON-LD.
+
+        Dibatasi ketat: mengirim puluhan permintaan HTML beruntun memicu
+        firewall Glints, dan ban-nya ikut memblokir operasi pencarian
+        berikutnya (inilah yang dulu membuat pool Glints tinggal 4 lowongan).
+        Sebagian besar data sudah didapat dari search, jadi pengayaan hanya
+        pelengkap dan tidak wajib berhasil.
+        """
         url_map = {j.url: j for j in jobs if j.url}
-        pages = fetch_many(list(url_map.keys()), _HTML_HEADERS, max_workers=max_workers)
+        urls = list(url_map.keys())[:max_enrich]
+        try:
+            pages = fetch_many(urls, _HTML_HEADERS, max_workers=max_workers)
+        except Exception:  # noqa: BLE001 — pengayaan gagal bukan masalah fatal
+            return
         for url, html in pages.items():
             if not html:
                 continue
@@ -121,6 +185,38 @@ class GlintsFetcher(BaseFetcher):
         city = (item.get("city") or {}).get("name")
         country = (item.get("country") or {}).get("name")
         job_id = str(item.get("id", ""))
+
+        # Data terstruktur dari skema Glints — jauh lebih akurat daripada
+        # menebak dari teks (dulu `work_arrangement` kosong untuk 90% lowongan).
+        is_remote = item.get("isRemote")
+        arrangement = item.get("workArrangementOption") or ""
+        if not arrangement and is_remote:
+            arrangement = "Remote"
+
+        # skills: list of {mustHave: bool, skill: {id, name, translationKey}}
+        skills: list[str] = []
+        for s in item.get("skills") or []:
+            if not isinstance(s, dict):
+                continue
+            detail = s.get("skill")
+            if isinstance(detail, dict) and detail.get("name"):
+                skills.append(str(detail["name"]))
+
+        # Susun konteks tambahan agar matching punya bahan (deskripsi lengkap
+        # tetap diambil dari halaman detail bila memungkinkan).
+        extra: list[str] = []
+        if item.get("educationLevel"):
+            extra.append(f"Education: {item['educationLevel']}")
+        if item.get("minYearsOfExperience") is not None:
+            extra.append(
+                f"Experience: {item.get('minYearsOfExperience')}-"
+                f"{item.get('maxYearsOfExperience')} years"
+            )
+        if item.get("isActivelyHiring"):
+            extra.append("Actively hiring")
+        if skills:
+            extra.append("Skills: " + ", ".join(skills))
+
         return Job(
             source="glints",
             external_id=job_id,
@@ -130,6 +226,10 @@ class GlintsFetcher(BaseFetcher):
             salary_min=salary.get("minAmount"),
             salary_max=salary.get("maxAmount"),
             currency=salary.get("CurrencyCode", "IDR"),
+            job_type=str(item.get("type") or ""),
+            work_arrangement=arrangement,
+            requirements=" | ".join(extra),
+            skills=skills,
             url=f"https://glints.com/id/opportunities/jobs/{job_id}",
             posted_at=item.get("createdAt", ""),
         )

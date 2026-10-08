@@ -69,7 +69,10 @@ export interface MatchResponse {
   count: number;
   pool_size: number;
   filtered_out: number;
+  below_floor: number;
   keywords: string;
+  live: { fetched: number; added: number; per_source: Record<string, number>; failed_sources: string[] } | { error: string } | null;
+  results_by_source: Record<string, number>;
   filters_applied: { sort_by: string; hard_filters: string[] };
   matches: Match[];
 }
@@ -128,6 +131,8 @@ export async function matchCv(
   preference: string,
   topN: number,
   filters?: JobFilters,
+  live = true,
+  minScore = 0,
 ): Promise<MatchResponse> {
   const form = new FormData();
   form.append("file", file);
@@ -135,6 +140,8 @@ export async function matchCv(
   form.append("location", location);
   form.append("preference", preference);
   form.append("top_n", String(topN));
+  form.append("live", String(live));
+  form.append("min_score", String(minScore));
   if (filters) {
     form.append("filters", JSON.stringify(filters));
   }

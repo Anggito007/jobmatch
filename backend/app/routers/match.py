@@ -24,7 +24,7 @@ from app.matching.scorer import blend_vectors, job_skills, job_text, score_match
 from app.matching.skills import extract_skills
 from app.models import User
 from app.preferences import from_dict, passes_hard_filters, preference_boost, sort_results
-from app.scheduler import collect_jobs
+from app.scheduler import collect_jobs, collect_jobs_live
 from app.store import get_jobs, save_cv
 
 router = APIRouter()
@@ -150,6 +150,8 @@ def match_cv(
     preference: str = Form(""),     # posisi/bidang yang diincar (mengemudikan matching)
     preference_weight: float = Form(0.65),  # 0..1, seberapa kuat preferensi vs CV
     filters: str = Form(""),        # JSON string preferensi/filter lanjutan
+    live: bool = Form(True),        # cari LANGSUNG ke portal (bukan hanya pool)
+    min_score: float = Form(0.0),   # ambang relevansi; 0 = tampilkan semua
     source: str | None = Form(None),
     top_n: int = Form(30),
     user: User | None = Depends(get_optional_user),
@@ -187,14 +189,26 @@ def match_cv(
             target_role=profile.target_role,
         )
 
-    # 3. Ambil pool lowongan dari DB; kumpulkan broad bila kosong.
-    rows = get_jobs(limit=5000)
+    # 3. Kumpulkan lowongan.
+    #    LIVE: cari langsung ke portal dengan kata kunci user — inilah yang
+    #    membuat hasil banyak & segar (portal mencari seluruh indeksnya).
+    #    Tanpa ini kita hanya menilai pool kecil yang tersimpan (~2.000 job),
+    #    sehingga hasil terasa sedikit walau situs aslinya punya ribuan.
+    live_info: dict | None = None
+    query = " ".join(t for t in (preference.strip(), keywords.strip()) if t).strip()
+    if live and query:
+        try:
+            live_info = collect_jobs_live(query.split(), location=location)
+        except Exception as e:  # live gagal → tetap lanjut dengan pool
+            live_info = {"error": str(e)[:200]}
+
+    rows = get_jobs(limit=20000)
     if source:
         rows = [r for r in rows if r.source == source]
     if not rows:
         kws = keywords.split() if keywords.strip() else []
         collect_jobs(keywords=kws)
-        rows = get_jobs(limit=5000)
+        rows = get_jobs(limit=20000)
         if source:
             rows = [r for r in rows if r.source == source]
 
@@ -206,12 +220,25 @@ def match_cv(
     # 4. Skor semua lowongan terhadap target (termasuk boost preferensi).
     results = score_rows(rows, target_vec, target_skills, target_text, embedder, pref_tokens, filt)
 
+    # 4b. Ambang relevansi — buang hasil yang terlalu lemah supaya tidak muncul
+    #     lowongan yang sebenarnya tidak berhubungan dengan CV/preferensi.
+    below_floor = 0
+    if min_score > 0:
+        kept = [r for r in results if r["score"] >= min_score]
+        below_floor = len(results) - len(kept)
+        results = kept
+
     # 5. Urutkan sesuai preferensi; diversifikasi hanya untuk "relevance".
     results = sort_results(results, filt.sort_by)
     if filt.sort_by in ("", "relevance"):
         results = _diversify(results, top_n)
     else:
         results = results[:top_n]
+
+    # Sebaran sumber pada hasil (transparansi: user ingin tahu tidak didominasi 1 situs).
+    by_source: dict[str, int] = {}
+    for r in results:
+        by_source[r["source"]] = by_source.get(r["source"], 0) + 1
 
     resp = profile.to_dict()
     resp["preference"] = preference.strip()
@@ -222,7 +249,10 @@ def match_cv(
         "count": len(results),
         "pool_size": len(rows),
         "filtered_out": filtered_out,
+        "below_floor": below_floor,
         "keywords": keywords,
+        "live": live_info,
+        "results_by_source": by_source,
         "filters_applied": {
             "sort_by": filt.sort_by,
             "hard_filters": [k for k in (
