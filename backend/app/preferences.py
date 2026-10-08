@@ -83,19 +83,29 @@ _EDU_KEYWORDS: dict[str, list[str]] = {
 }
 
 # Peta tipe kerja (string sumber → kanonik).
+# Peta tipe kerja (string sumber → kanonik). Urutan penting: entri spesifik dulu
+# karena `_norm_job_type` memakai pencocokan substring sebagai fallback.
 _JOB_TYPE_MAP: dict[str, str] = {
+    "contract/temp": "contract", "contract/temporary": "contract",
+    "kontrak/temporer": "contract", "full time, contract/temp": "full_time",
     "full time": "full_time", "full-time": "full_time", "fulltime": "full_time",
-    "permanent": "full_time", "tetap": "full_time", "full_time": "full_time",
+    "purna waktu": "full_time", "penuh waktu": "full_time", "permanent": "full_time",
+    "tetap": "full_time", "full_time": "full_time",
     "part time": "part_time", "part-time": "part_time", "parttime": "part_time",
     "paruh waktu": "part_time", "part_time": "part_time",
     "contract": "contract", "kontrak": "contract",
     "internship": "internship", "magang": "internship", "intern": "internship",
     "freelance": "freelance", "freelancer": "freelance", "lepas": "freelance",
-    "temporary": "temporary", "temp": "temporary", "sementara": "temporary",
+    "temporary": "temporary", "sementara": "temporary", "temp": "temporary",
+    # Penanda "tidak ada info" → dikembalikan sebagai kosong (unknown).
+    "tidak disebutkan": "", "tidak ada": "", "lainnya": "",
 }
 
-_REMOTE_WORDS = ["remote", "work from home", "wfh", "jarak jauh", "dari rumah"]
-_HYBRID_WORDS = ["hybrid", "hibrida", "on-site & remote", "mixed"]
+_REMOTE_WORDS = ["remote", "remotely", "remote work", "work from home", "wfh",
+                 "jarak jauh", "dari rumah", "kerja remote", "bekerja dari rumah"]
+_HYBRID_WORDS = ["hybrid", "hibrida", "hybrid work", "kerja hybrid", "on-site & remote", "mixed"]
+_ONSITE_WORDS = ["on-site", "onsite", "on site", "wfo", "work from office",
+                 "di kantor", "dari kantor", "bekerja di kantor"]
 _ABROAD_WORDS = ["abroad", "overseas", "international", "relocation", "visa sponsorship",
                  "luar negeri", "relokasi", "visa"]
 _FRESHGRAD_WORDS = ["fresh grad", "fresh graduate", "freshgrad", "lulusan baru",
@@ -127,7 +137,9 @@ class Filters:
     min_salary: float | None = None
     max_salary: float | None = None
     salary_currency: str = ""
-    salary_not_specified: bool = False
+    # Default True: 76% lowongan tidak mencantumkan gaji — membuang semuanya
+    # membuat filter gaji minimum menghabiskan pool.
+    salary_not_specified: bool = True
     remote: bool = False
     hybrid: bool = False
     work_abroad: bool = False
@@ -179,7 +191,7 @@ def from_dict(data: dict[str, Any] | None) -> Filters:
         min_salary=num("min_salary"),
         max_salary=num("max_salary"),
         salary_currency=str(data.get("salary_currency") or "").upper(),
-        salary_not_specified=flag("salary_not_specified"),
+        salary_not_specified=(True if "salary_not_specified" not in data else bool(data.get("salary_not_specified"))),
         remote=flag("remote"),
         hybrid=flag("hybrid"),
         work_abroad=flag("work_abroad"),
@@ -220,12 +232,31 @@ def _normalize(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip().lower()
 
 
+def _hits(text: str, words: list[str]) -> bool:
+    """True bila salah satu kata muncul sebagai KATA UTUH (bukan bagian kata lain).
+
+    Penting: "intern" tidak boleh cocok di "internal"/"international".
+    """
+    for w in words:
+        if not w:
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", text):
+            return True
+    return False
+
+
 def _norm_job_type(raw: str) -> str:
     """Map string job_type sumber → kanonik. Kosong bila tidak dikenali."""
     t = _normalize(raw)
     if not t:
         return ""
-    return _JOB_TYPE_MAP.get(t, "")
+    if t in _JOB_TYPE_MAP:
+        return _JOB_TYPE_MAP[t]
+    # Fallback substring: "Full time, Contract/Temp" → full_time.
+    for k, v in _JOB_TYPE_MAP.items():
+        if k and k in t:
+            return v
+    return ""
 
 
 def _job_full_text(job) -> str:
@@ -238,12 +269,34 @@ def _job_full_text(job) -> str:
 
 
 def _arrangement(job) -> str:
-    """Kembalikan 'remote'|'hybrid'|'' berdasarkan field + teks."""
-    txt = _normalize(" ".join(p for p in (job.work_arrangement, job.title, job.location) if p))
-    if any(w in txt for w in _REMOTE_WORDS):
+    """Kembalikan 'remote'|'hybrid'|'onsite'|'' ('' = tidak diketahui).
+
+    Field eksplisit diperiksa lebih dulu (paling dapat dipercaya), lalu judul +
+    lokasi, baru deskripsi. Mengembalikan '' bila tidak ada sinyal sama sekali —
+    pemanggil HARUS memperlakukan '' sebagai "tidak diketahui", bukan "tidak cocok".
+    """
+    wa = _normalize(getattr(job, "work_arrangement", ""))
+    if wa:
+        if _hits(wa, _REMOTE_WORDS):
+            return "remote"
+        if _hits(wa, _HYBRID_WORDS):
+            return "hybrid"
+        if _hits(wa, _ONSITE_WORDS):
+            return "onsite"
+
+    head = _normalize(" ".join(p for p in (job.title, job.location) if p))
+    if _hits(head, _REMOTE_WORDS):
         return "remote"
-    if any(w in txt for w in _HYBRID_WORDS):
+    if _hits(head, _HYBRID_WORDS):
         return "hybrid"
+
+    body = _normalize(getattr(job, "description", "") or "")
+    if _hits(body, _REMOTE_WORDS):
+        return "remote"
+    if _hits(body, _HYBRID_WORDS):
+        return "hybrid"
+    if _hits(body, _ONSITE_WORDS):
+        return "onsite"
     return ""
 
 
@@ -273,25 +326,36 @@ def _hard_location(job, f: Filters) -> bool:
 
 
 def _hard_job_type(job, f: Filters) -> bool:
+    """Buang hanya bila tipe kerja lowongan DIKETAHUI dan tidak diinginkan.
+
+    74% lowongan tidak mengisi `job_type`. Memperlakukan itu sebagai "tidak
+    cocok" akan membuang hampir seluruh pool — jadi yang tidak diketahui DIBIARKAN.
+    """
     if not f.job_types:
         return True
     jt = _norm_job_type(job.job_type)
     if jt:
         return jt in f.job_types
-    # Field kosong/tak dikenal → deteksi dari teks + judul.
+    # Field tidak dikenali → coba deteksi dari teks (kata utuh, bukan substring).
     txt = _job_full_text(job)
-    title = _normalize(job.title)
-    for cand in f.job_types:
-        for k in _JOB_TYPE_ALIASES.get(cand, []):
-            if k in txt or k in title:
-                return True
-    return False
+    if _hits(txt, [a for w in f.job_types for a in _JOB_TYPE_ALIASES.get(w, [])]):
+        return True
+    # Ada tipe LAIN yang jelas disebut? → kontradiksi positif → buang.
+    others = [a for t, al in _JOB_TYPE_ALIASES.items() if t not in f.job_types for a in al]
+    if _hits(txt, others):
+        return False
+    # Tidak ada info tipe sama sekali → jangan buang.
+    return True
 
 
 def _hard_salary(job, f: Filters) -> bool:
+    """Buang hanya bila lowongan PUNYA data gaji yang bertentangan.
+
+    76% lowongan tidak mencantumkan gaji. `salary_not_specified` default True,
+    jadi lowongan tanpa info gaji tetap lolos (kecuali user minta sebaliknya).
+    """
     if f.min_salary is None and f.max_salary is None:
         return True
-    # Gaji lowongan kosong.
     jmin = job.salary_min
     jmax = job.salary_max
     if jmin is None and jmax is None:
@@ -343,16 +407,16 @@ def _hard_company(job, f: Filters) -> bool:
 
 
 def _hard_arrangement(job, f: Filters) -> bool:
-    """Bila remote/hybrid dipilih EKSPLISIT, jadikan filter keras."""
+    """Buang HANYA lowongan yang PASTI on-site (kontradiksi positif).
+
+    Ini bug terbesar sebelumnya: 92% lowongan tidak mengisi `work_arrangement`,
+    jadi aturan lama (`arr == "remote"`) membuang 1.844 dari 1.877 lowongan —
+    termasuk lowongan yang justru cocok dengan preferensi. Pengaturan kerja
+    sekarang jadi penyaring lunak (boost) + hanya membuang yang jelas on-site.
+    """
     if not f.remote and not f.hybrid:
         return True
-    arr = _arrangement(job)
-    if f.remote and not f.hybrid:
-        return arr == "remote"
-    if f.hybrid and not f.remote:
-        return arr == "hybrid"
-    # keduanya dipilih → remote ATAU hybrid boleh
-    return arr in ("remote", "hybrid")
+    return _arrangement(job) != "onsite"
 
 
 def passes_hard_filters(job, f: Filters) -> bool:
@@ -431,14 +495,15 @@ def preference_boost(job, f: Filters) -> tuple[float, list[str]]:
             reasons.append("Gaji memenuhi minimum")
             boost += 0.04
 
-    # Remote / hybrid.
+    # Remote / hybrid — sekarang sinyal UTAMA untuk filter ini (bukan hard filter),
+    # jadi boost-nya dinaikkan agar lowongan remote benar-benar naik ke atas.
     arr = _arrangement(job)
     if f.remote and arr == "remote":
         reasons.append("Remote (WFH)")
-        boost += 0.03
+        boost += 0.08
     if f.hybrid and arr == "hybrid":
         reasons.append("Hybrid")
-        boost += 0.03
+        boost += 0.08
 
     # Bekerja di luar negeri.
     if f.work_abroad and any(w in txt for w in _ABROAD_WORDS):

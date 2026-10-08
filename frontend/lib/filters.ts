@@ -99,7 +99,9 @@ export const EMPTY_FILTERS: JobFilters = {
   min_salary: null,
   max_salary: null,
   salary_currency: "",
-  salary_not_specified: false,
+  // Default true: sebagian besar lowongan tidak mencantumkan gaji — kalau ini
+  // false, filter gaji minimum akan membuang hampir seluruh pool.
+  salary_not_specified: true,
   remote: false,
   hybrid: false,
   work_abroad: false,
