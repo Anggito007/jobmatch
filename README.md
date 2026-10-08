@@ -35,7 +35,20 @@ backend/   (FastAPI · Python)              ──▶  Render/Railway/VPS
 3. Skor hybrid tiap lowongan: `0.45·cosine + 0.30·skill_overlap + 0.25·lexical_overlap`.
 4. Urutkan + diversifikasi (batasi dominasi satu perusahaan/sumber).
 
-## Jalankan backend (development)
+## Menjalankan & menghentikan (Windows — cara termudah)
+
+Dua file batch di root project:
+
+| File | Fungsi |
+|---|---|
+| **`start.bat`** | Menyalakan backend (port 8000) + frontend (port 3000) di dua jendela terpisah, menunggu server siap, lalu memverifikasi keduanya dan menampilkan URL. |
+| **`stop.bat`** | Menghentikan kedua server (tutup jendela + sapu proses yang masih memegang port 8000/3000), lalu memverifikasi port sudah kosong. |
+
+Cukup **klik dua kali** `start.bat` untuk mulai, `stop.bat` untuk berhenti.
+
+`start.bat` juga otomatis menjalankan `npm install` bila `frontend/node_modules` belum ada, dan memperingatkan bila virtualenv backend belum dibuat.
+
+## Jalankan manual (development)
 
 ```bash
 cd backend
